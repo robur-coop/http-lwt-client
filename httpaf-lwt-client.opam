@@ -1,0 +1,29 @@
+opam-version: "2.0"
+maintainer: "Robur <team@robur.coop>"
+authors: ["Robur <team@robur.coop>"]
+homepage: "https://github.com/roburio/httpaf-lwt-client"
+dev-repo: "git+https://github.com/roburio/httpaf-lwt-client.git"
+bug-reports: "https://github.com/roburio/httpaf-lwt-client/issues"
+license: "ISC"
+
+depends: [
+  "ocaml" {>= "4.08.0"}
+  "dune" {>= "2.0.0"}
+  "cmdliner"
+  "logs"
+  "lwt"
+  "rresult"
+  "base64" {>= "3.1.0"}
+  "faraday-lwt-unix"
+  "httpaf"
+  "tls"
+  "dns-client"
+  "ca-certs"
+  "fmt"
+]
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+]
+
+synopsis: "A simple HTTP client using http/af and lwt"

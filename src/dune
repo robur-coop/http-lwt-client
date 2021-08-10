@@ -1,0 +1,5 @@
+(library
+ (name httpaf_lwt_client)
+ (public_name httpaf-lwt-client)
+ (libraries faraday-lwt-unix httpaf lwt.unix tls.lwt dns-client.lwt ca-certs
+            rresult base64 logs))

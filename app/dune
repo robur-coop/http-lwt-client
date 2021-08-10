@@ -1,0 +1,3 @@
+(executable
+  (libraries httpaf-lwt-client lwt.unix logs.fmt fmt.cli logs.cli fmt.tty cmdliner)
+  (name hurl))
