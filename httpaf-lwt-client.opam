@@ -4,7 +4,7 @@ authors: ["Robur <team@robur.coop>"]
 homepage: "https://github.com/roburio/httpaf-lwt-client"
 dev-repo: "git+https://github.com/roburio/httpaf-lwt-client.git"
 bug-reports: "https://github.com/roburio/httpaf-lwt-client/issues"
-license: "ISC"
+license: "BSD-3-clause"
 
 depends: [
   "ocaml" {>= "4.08.0"}
