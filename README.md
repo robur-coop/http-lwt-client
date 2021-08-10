@@ -8,9 +8,12 @@ Additionally, a sample binary `hurl` is provided that exposes most of the
 functionality as a command line program.
 
 Other HTTP clients developed in OCaml include
-[piaf](https://github.com/anmonteiro/piaf),
-[cohttp](https://github.com/mirage/ocaml-cohttp),
-[curly](https://github.com/rgrinberg/curly) - but they didn't fit our needs.
+[ofetch](https://github.com/cfcs/ofetch/) (minimal OCaml stdlib-only),
+[piaf](https://github.com/anmonteiro/piaf) (HTTP 1 and HTTP 2 support),
+[cohttp](https://github.com/mirage/ocaml-cohttp) (a functorised HTTP client and
+server library), [curly](https://github.com/rgrinberg/curly) (a wrapper around
+`curl`), [paf-le-chien](https://github.com/dinosaure/paf-le-chien) (a MirageOS
+layer for HTTP/AF and H2) - but they didn't fit our needs.
 
 This is distributed under the 3 clause BSD license, some code is inherited from
 the [HTTP/AF](https://github.com/inhabitedtype/httpaf) project
