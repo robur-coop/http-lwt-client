@@ -1,3 +1,5 @@
 (executable
-  (libraries httpaf-lwt-client lwt.unix logs.fmt fmt.cli logs.cli fmt.tty cmdliner)
-  (name hurl))
+  (name hurl)
+  (public_name hurl)
+  (libraries httpaf-lwt-client lwt.unix logs.fmt fmt.cli logs.cli fmt.tty
+             cmdliner bos rresult))
