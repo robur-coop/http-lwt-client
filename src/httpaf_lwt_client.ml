@@ -95,18 +95,16 @@ let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
   let on_eof response data () =
     Lwt.wakeup_later notify_finished (Ok (response, data))
   in
-  let response_handler response response_body = match response with
-    | { Httpaf.Response.status = `OK; _ } ->
-      let rec on_read on_eof data bs ~off ~len =
-        let data = data ^ Bigstringaf.substring ~off ~len bs in
-        Httpaf.Body.schedule_read response_body
-          ~on_read:(on_read on_eof data)
-          ~on_eof:(on_eof response (Some data))
-      in
+  let response_handler response response_body =
+    let rec on_read on_eof data bs ~off ~len =
+      let data = data ^ Bigstringaf.substring ~off ~len bs in
       Httpaf.Body.schedule_read response_body
-        ~on_read:(on_read on_eof "")
-        ~on_eof:(on_eof response None)
-    | response -> on_eof response None ()
+        ~on_read:(on_read on_eof data)
+        ~on_eof:(on_eof response (Some data))
+    in
+    Httpaf.Body.schedule_read response_body
+      ~on_read:(on_read on_eof "")
+      ~on_eof:(on_eof response None)
   in
   let error_handler e =
     let err = match e with
