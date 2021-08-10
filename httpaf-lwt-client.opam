@@ -20,6 +20,7 @@ depends: [
   "dns-client"
   "ca-certs"
   "fmt"
+  "bos"
 ]
 build: [
   ["dune" "subst"] {dev}
