@@ -104,31 +104,42 @@ let shutdown socket command =
   try Lwt_unix.shutdown socket command
   with Unix.Unix_error (Unix.ENOTCONN, _, _) -> ()
 
-module Config = Httpaf.Config
+module type RUNTIME = sig
+  type t
 
-module Client = struct
-  let request ?(config=Config.default) socket request ~error_handler ~response_handler =
+  val next_read_operation : t -> [ `Read | `Yield | `Close ]
+  val read : t -> Bigstringaf.t -> off:int -> len:int -> int
+  val read_eof : t -> Bigstringaf.t -> off:int -> len:int -> int
+  val yield_reader : t -> (unit -> unit) -> unit
+  val next_write_operation : t -> [ `Write of Bigstringaf.t Faraday.iovec list | `Close of int | `Yield ]
+  val report_write_result : t -> [ `Ok of int | `Closed ] -> unit
+  val yield_writer : t -> (unit -> unit) -> unit
+  val report_exn : t -> exn -> unit
+end
+
+module Make (Runtime : RUNTIME) = struct
+  let request ?(read_buffer_size = 0x1000) socket connection =
     let module Client_connection = Httpaf.Client_connection in
-    let request_body, connection =
-      Client_connection.request ~config request ~error_handler ~response_handler in
 
-
-    let read_buffer = Buffer.create config.read_buffer_size in
+    let read_buffer = Buffer.create read_buffer_size in
     let read_loop_exited, notify_read_loop_exited = Lwt.wait () in
 
-    let read_loop () =
+    let rec read_loop () =
       let rec read_loop_step () =
-        match Client_connection.next_read_operation connection with
+        match Runtime.next_read_operation connection with
+        | `Yield ->
+          Runtime.yield_reader connection read_loop ;
+          Lwt.return_unit
         | `Read ->
           read socket read_buffer >>= begin function
           | `Eof ->
             Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
-              Client_connection.read_eof connection bigstring ~off ~len)
+              Runtime.read_eof connection bigstring ~off ~len)
             |> ignore;
             read_loop_step ()
           | `Ok _ ->
             Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
-              Client_connection.read connection bigstring ~off ~len)
+              Runtime.read connection bigstring ~off ~len)
             |> ignore;
             read_loop_step ()
           end
@@ -149,7 +160,7 @@ module Client = struct
         Lwt.catch
           read_loop_step
           (fun exn ->
-            Client_connection.report_exn connection exn;
+            Runtime.report_exn connection exn;
             Lwt.return_unit))
     in
 
@@ -175,14 +186,14 @@ module Client = struct
 
     let rec write_loop () =
       let rec write_loop_step () =
-        match Client_connection.next_write_operation connection with
+        match Runtime.next_write_operation connection with
         | `Write io_vectors ->
           writev io_vectors >>= fun result ->
-          Client_connection.report_write_result connection result;
+          Runtime.report_write_result connection result;
           write_loop_step ()
 
         | `Yield ->
-          Client_connection.yield_writer connection write_loop;
+          Runtime.yield_writer connection write_loop;
           Lwt.return_unit
 
         | `Close _ ->
@@ -194,7 +205,7 @@ module Client = struct
         Lwt.catch
           write_loop_step
           (fun exn ->
-            Client_connection.report_exn connection exn;
+            Runtime.report_exn connection exn;
             Lwt.return_unit))
     in
 
@@ -214,6 +225,14 @@ module Client = struct
         else
           Lwt.return_unit
       | `Tls t -> Tls_lwt.Unix.close t);
-
-    request_body
 end
+
+module Httpaf_client_connection = struct
+  include Httpaf.Client_connection
+  let yield_reader _ = assert false
+  let next_read_operation connection =
+    (next_read_operation connection :> [ `Close | `Read | `Yield ])
+end
+
+module Client_HTTP_1_1 = Make (Httpaf_client_connection)
+module Client_H2 = Make (H2.Client_connection)

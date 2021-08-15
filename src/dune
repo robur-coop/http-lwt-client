@@ -1,5 +1,5 @@
 (library
  (name httpaf_lwt_client)
  (public_name httpaf-lwt-client)
- (libraries faraday-lwt-unix httpaf lwt.unix tls.lwt ca-certs rresult base64
+ (libraries faraday-lwt-unix h2 httpaf lwt.unix tls.lwt ca-certs rresult base64
             logs happy-eyeballs-lwt))
