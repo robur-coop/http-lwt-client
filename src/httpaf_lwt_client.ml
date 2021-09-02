@@ -1,23 +1,12 @@
 open Lwt_result.Infix
 
-(* TODO happy eyeballs -- IPv6 support *)
-let connect resolver ?port ~tls ?authenticator host =
+let open_err r =
+  let open Lwt.Infix in
+  r >|= Rresult.R.open_error_msg
+
+let connect he ?port ~tls ?authenticator host =
   let port = match port with None -> if tls then 443 else 80 | Some p -> p in
-  (match Ipaddr.V4.of_string host with
-   | Ok ip -> Lwt_result.lift (Ok (ip, None))
-   | Error _ ->
-     Lwt_result.lift (Domain_name.of_string host) >>= fun dn ->
-     Lwt_result.lift (Domain_name.host dn) >>= fun host ->
-     Dns_client_lwt.gethostbyname resolver host >|= fun ip ->
-     (ip, Some host)) >>= fun (ip, host) ->
-  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Lwt.catch
-    (fun () ->
-       let addr = Unix.ADDR_INET (Ipaddr_unix.V4.to_inet_addr ip, port) in
-       Lwt_result.ok (Lwt_unix.connect socket addr))
-    (fun e ->
-       Lwt.return (Error (`Msg ("connect failure: " ^ Printexc.to_string e))))
-  >>= fun () ->
+  open_err (Happy_eyeballs_lwt.connect he host [port]) >>= fun (_addr, socket) ->
   if tls then
     Lwt_result.lift (match authenticator with
         | None -> Ca_certs.authenticator ()
@@ -25,6 +14,10 @@ let connect resolver ?port ~tls ?authenticator host =
     let config = Tls.Config.client ~authenticator () in
     Lwt.catch
       (fun () ->
+         let host =
+           let open Rresult.R.Infix in
+           Rresult.R.to_option (Domain_name.of_string host >>= Domain_name.host)
+         in
          Lwt_result.ok (Tls_lwt.Unix.client_of_fd config ?host socket))
       (fun e ->
          Lwt.return (Error (`Msg ("TLS failure: " ^ Printexc.to_string e))))
@@ -132,12 +125,12 @@ let one_request
     ?(max_redirect = 5)
     uri
   =
-  let resolver = Dns_client_lwt.create () in
+  let he = Happy_eyeballs_lwt.create () in
   let rec follow_redirect count uri =
     if count = 0 then
       Lwt.return (Error (`Msg "redirect limit exceeded"))
     else
-      single_request resolver ?config ?authenticator ~meth ~headers ?body uri
+      single_request he ?config ?authenticator ~meth ~headers ?body uri
       >>= fun (resp, body) ->
       match resp.Httpaf.Response.status with
       | `Moved_permanently | `Found | `See_other | `Temporary_redirect ->
@@ -149,4 +142,3 @@ let one_request
       | _ -> Lwt_result.return (resp, body)
   in
   follow_redirect max_redirect uri
-
