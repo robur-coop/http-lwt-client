@@ -17,10 +17,10 @@ depends: [
   "faraday-lwt-unix"
   "httpaf"
   "tls"
-  "dns-client"
   "ca-certs"
   "fmt"
   "bos"
+  "happy-eyeballs-lwt"
 ]
 build: [
   ["dune" "subst"] {dev}
