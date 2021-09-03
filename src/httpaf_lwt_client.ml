@@ -189,7 +189,9 @@ let alpn_protocol = function
     | Ok { Tls.Core.alpn_protocol= Some "h2"; _ } -> Some `H2
     | Ok { Tls.Core.alpn_protocol= Some "http/1.1"; _ } -> Some `HTTP_1_1
     | Ok { Tls.Core.alpn_protocol= None; _ } -> None
-    | Ok { Tls.Core.alpn_protocol= Some _; _ } -> assert false (* XXX(dinosaure): safe? *)
+    | Ok { Tls.Core.alpn_protocol= Some protocol; _ } ->
+      Logs.warn (fun m -> m "The ALPN negociation gives a wrong protocol: %S." protocol) ;
+      None
     | Error () -> None
 
 let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
