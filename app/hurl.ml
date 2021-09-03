@@ -65,8 +65,8 @@ let header =
 
 let protocol =
   let vs =
-    [ Some `HTTP_1_1, Arg.info [ "only-http-1-1" ] ~doc:"Use the HTTP/1.1 protocol"
-    ; Some `H2, Arg.info [ "only-h2" ] ~doc:"Use the H2 protocol" ] in
+    [ Some `HTTP_1_1, Arg.info [ "http1" ] ~doc:"Only use the HTTP/1.1 protocol"
+    ; Some `H2, Arg.info [ "http2" ] ~doc:"Only use the H2 protocol" ] in
   Arg.(value & vflag None vs)
 
 let meth =
