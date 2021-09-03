@@ -62,6 +62,12 @@ let decode_uri uri =
     is_tls, scheme, user_pass, host, port, "/" ^ String.concat "/" path
   | _ -> Error (`Msg "couldn't decode URI on top")
 
+let add_authentication ~add user_pass headers = match user_pass with
+  | None -> headers
+  | Some (user, pass) ->
+    let data = Base64.encode_string (user ^ ":" ^ pass) in
+    let s = "Basic " ^ data in
+    add headers "authorization" s
 
 let prep_http_1_1_headers headers host user_pass blen =
   let headers = Httpaf.Headers.of_list headers in
@@ -73,12 +79,7 @@ let prep_http_1_1_headers headers host user_pass blen =
     | None -> headers
     | Some x -> add headers "content-length" (string_of_int x)
   in 
-  match user_pass with
-  | None -> headers
-  | Some (user, pass) ->
-    let data = Base64.encode_string (user ^ ":" ^ pass) in
-    let s = "Basic " ^ data in
-    add headers "authorization" s
+  add_authentication ~add:Httpaf.Headers.add user_pass headers
 
 let prep_h2_headers headers host user_pass blen =
   let headers = H2.Headers.of_list headers in
@@ -88,12 +89,7 @@ let prep_h2_headers headers host user_pass blen =
     | None -> add headers "content-length" "0"
     | Some x -> add headers "content-length" (string_of_int x)
   in 
-  match user_pass with
-  | None -> headers
-  | Some (user, pass) ->
-    let data = Base64.encode_string (user ^ ":" ^ pass) in
-    let s = "Basic " ^ data in
-    add headers "authorization" s
+  add_authentication ~add:(fun k v -> H2.Headers.add k v) user_pass headers
 
 type response =
   | HTTP_1_1 of Httpaf.Response.t
