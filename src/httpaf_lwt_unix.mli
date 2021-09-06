@@ -32,14 +32,18 @@
     POSSIBILITY OF SUCH DAMAGE.
   ----------------------------------------------------------------------------*)
 
-open Httpaf
-
-module Client : sig
+module Client_HTTP_1_1 : sig
   val request
-    :  ?config          : Config.t
+    :  ?read_buffer_size:int
     -> [ `Tls of Tls_lwt.Unix.t | `Plain of Lwt_unix.file_descr ]
-    -> Request.t
-    -> error_handler    : Client_connection.error_handler
-    -> response_handler : Client_connection.response_handler
-    -> [`write] Body.t
+    -> Httpaf.Client_connection.t
+    -> unit
+end
+
+module Client_H2 : sig
+  val request
+    :  ?read_buffer_size:int
+    -> [ `Tls of Tls_lwt.Unix.t | `Plain of Lwt_unix.file_descr ]
+    -> H2.Client_connection.t
+    -> unit
 end

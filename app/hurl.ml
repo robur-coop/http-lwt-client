@@ -1,20 +1,23 @@
+let pp_response ppf = function
+  | Httpaf_lwt_client.HTTP_1_1 resp -> Httpaf.Response.pp_hum ppf resp
+  | Httpaf_lwt_client.H2 resp -> H2.Response.pp_hum ppf resp
 
-let jump () uri meth header output input =
+let jump () protocol uri meth headers output input =
   let open Rresult.R.Infix in
+  let config = match protocol with
+    | None -> None
+    | Some `HTTP_1_1 -> Some (`HTTP_1_1 Httpaf.Config.default)
+    | Some `H2 -> Some (`H2 H2.Config.default) in
   (match input with
    | None -> Ok (None, `GET)
    | Some fn -> Bos.OS.File.read (Fpath.v fn) >>| fun d -> (Some d, `POST))
   >>= fun (body, default_meth) ->
   let meth = match meth with None -> default_meth | Some x -> x in
-  let headers =
-    List.fold_left (fun hdr (k, v) -> Httpaf.Headers.add hdr k v)
-      Httpaf.Headers.empty header
-  in
   let open Lwt.Infix in
   Lwt_main.run (
-    Httpaf_lwt_client.one_request ~meth ~headers ?body uri >|= function
+    Httpaf_lwt_client.one_request ?config ~meth ~headers ?body uri >|= function
     | Ok (resp, body) ->
-      Format.fprintf Format.std_formatter "%a\n%!" Httpaf.Response.pp_hum resp;
+      Format.fprintf Format.std_formatter "%a\n%!" pp_response resp;
       (match body with
        | None -> Ok ()
        | Some data ->
@@ -60,6 +63,12 @@ let header =
   let doc = "HTTP header (key:value)" in
   Arg.(value & opt_all header_c [] & info [ "header" ] ~doc ~docv:"HEADER")
 
+let protocol =
+  let vs =
+    [ Some `HTTP_1_1, Arg.info [ "http1" ] ~doc:"Only use the HTTP/1.1 protocol"
+    ; Some `H2, Arg.info [ "http2" ] ~doc:"Only use the H2 protocol" ] in
+  Arg.(value & vflag None vs)
+
 let meth =
   let doc = "HTTP method to use (defaults to GET, POST when body)" in
   let ms = [
@@ -72,7 +81,7 @@ let meth =
   Arg.(value & opt (some (enum ms)) None & info [ "method" ] ~doc ~docv:"METHOD")
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ uri $ meth $ header $ input $ output)),
+  Term.(term_result (const jump $ setup_log $ protocol $ uri $ meth $ header $ input $ output)),
   Term.info "hurl" ~version:"%%VERSION_NUM%%"
 
 let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1

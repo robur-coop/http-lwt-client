@@ -21,6 +21,7 @@ depends: [
   "fmt"
   "bos"
   "happy-eyeballs-lwt"
+  "h2"
 ]
 build: [
   ["dune" "subst"] {dev}
