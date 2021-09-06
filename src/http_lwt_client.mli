@@ -1,6 +1,16 @@
+module Version = Httpaf.Version
+
+module Status = H2.Status
+
+module Headers = H2.Headers
+
 type response =
-  | HTTP_1_1 of Httpaf.Response.t
-  | H2 of H2.Response.t
+  { version : Version.t
+  ; status  : Status.t
+  ; reason  : string
+  ; headers : Headers.t }
+
+val pp_response : Format.formatter -> response -> unit
 
 val one_request
   : ?config : [ `HTTP_1_1 of Httpaf.Config.t | `H2 of H2.Config.t ]

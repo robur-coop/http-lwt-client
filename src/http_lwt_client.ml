@@ -90,9 +90,19 @@ let prep_h2_headers headers host user_pass blen =
   in
   add_authentication ~add headers user_pass
 
+module Version = Httpaf.Version
+module Status = H2.Status
+module Headers = H2.Headers
+
 type response =
-  | HTTP_1_1 of Httpaf.Response.t
-  | H2 of H2.Response.t
+  { version : Version.t
+  ; status  : Status.t
+  ; reason  : string
+  ; headers : Headers.t }
+
+let pp_response ppf { version ; status ; reason ; headers } =
+  Format.fprintf ppf "((version \"%a\") (status %a) (reason %S) (headers %a))"
+    Version.pp_hum version Status.pp_hum status reason Headers.pp_hum headers
 
 let single_http_1_1_request ?config fd user_pass host meth path headers body =
   let blen = match body with None -> None | Some x -> Some (String.length x) in
@@ -100,7 +110,16 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
   let req = Httpaf.Request.create ~headers meth path in
   let finished, notify_finished = Lwt.wait () in
   let on_eof response data () =
-    Lwt.wakeup_later notify_finished (Ok (HTTP_1_1 response, data))
+    let headers =
+      H2.Headers.of_list (Httpaf.Headers.to_list response.Httpaf.Response.headers)
+    in
+    let response : response = {
+      version = response.Httpaf.Response.version ;
+      status = (response.Httpaf.Response.status :> H2.Status.t) ;
+      reason = response.Httpaf.Response.reason ;
+      headers
+    } in
+    Lwt.wakeup_later notify_finished (Ok (response, data))
   in
   let response_handler response response_body =
     let rec on_read on_eof data bs ~off ~len =
@@ -116,7 +135,7 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
   let error_handler e =
     let err = match e with
       | `Malformed_response x -> Error (`Msg ("malformed response: " ^ x))
-      | `Invalid_response_body_length _ -> Error (`Msg "invliad response body length")
+      | `Invalid_response_body_length _ -> Error (`Msg "invalid response body length")
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
     Lwt.wakeup_later notify_finished err
@@ -142,7 +161,13 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
   Logs.debug (fun m -> m "Sending @[<v 0>%a@]" H2.Request.pp_hum req);
   let finished, notify_finished = Lwt.wait () in
   let on_eof response data () =
-    Lwt.wakeup_later notify_finished (Ok (H2 response, data))
+    let response : response = {
+      version = { major = 2 ; minor = 0 } ;
+      status = response.H2.Response.status ;
+      reason = "" ;
+      headers = response.H2.Response.headers ;
+    } in
+    Lwt.wakeup_later notify_finished (Ok (response, data))
   in
   let response_handler response response_body =
     let rec on_read on_eof data bs ~off ~len =
@@ -158,7 +183,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
   let error_handler e =
     let err = match e with
       | `Malformed_response x -> Error (`Msg ("malformed response: " ^ x))
-      | `Invalid_response_body_length _ -> Error (`Msg "invliad response body length")
+      | `Invalid_response_body_length _ -> Error (`Msg "invalid response body length")
       | `Protocol_error (err, msg) -> Rresult.R.error_msgf "%a: %s" H2.Error_code.pp_hum err msg
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
@@ -188,7 +213,8 @@ let alpn_protocol = function
     | Ok { Tls.Core.alpn_protocol= Some "http/1.1"; _ } -> Some `HTTP_1_1
     | Ok { Tls.Core.alpn_protocol= None; _ } -> None
     | Ok { Tls.Core.alpn_protocol= Some protocol; _ } ->
-      Logs.warn (fun m -> m "The ALPN negociation gives a wrong protocol: %S." protocol) ;
+      Logs.warn (fun m -> m "The ALPN negotiation unexpectedly resulted in %S."
+                    protocol);
       None
     | Error () -> None
 
@@ -202,31 +228,23 @@ let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
   connect resolver ?port ?alpn_protocols ~tls ?authenticator host >>= fun fd ->
   match alpn_protocol fd, config with
   | (Some `HTTP_1_1 | None), Some (`HTTP_1_1 config) ->
-    Logs.debug (fun m -> m "Start an http/1.1 connection as expected.") ;
+    Logs.debug (fun m -> m "Start an http/1.1 connection as expected.");
     single_http_1_1_request ~config fd user_pass host meth path headers body
   | (Some `HTTP_1_1 | None), None ->
-    Logs.debug (fun m -> m "Start an http/1.1 connection by default.") ;
+    Logs.debug (fun m -> m "Start an http/1.1 connection by default.");
     single_http_1_1_request fd user_pass host meth path headers body
   | (Some `H2 | None), Some (`H2 config) ->
-    Logs.debug (fun m -> m "Start an h2 connection as expected.") ;
+    Logs.debug (fun m -> m "Start an h2 connection as expected.");
     single_h2_request ~config fd scheme user_pass host meth path headers body
   | Some `H2, None ->
-    Logs.debug (fun m -> m "Start an h2 connection as requested by the server.") ;
+    Logs.debug (fun m -> m "Start an h2 connection as requested by the server.");
     single_h2_request fd scheme user_pass host meth path headers body
   | Some `H2, Some (`HTTP_1_1 _config) ->
-    Logs.warn (fun m -> m "Initiate an h2 connection despite a requested http/1.1 connection.") ;
+    Logs.warn (fun m -> m "Initiate an h2 connection despite a requested http/1.1 connection.");
     single_h2_request fd scheme user_pass host meth path headers body
   | Some `HTTP_1_1, Some (`H2 _config) ->
-    Logs.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.") ;
+    Logs.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.");
     single_http_1_1_request fd user_pass host meth path headers body
-
-let status = function
-  | HTTP_1_1 resp -> (resp.Httpaf.Response.status :> H2.Status.t)
-  | H2 resp -> resp.H2.Response.status
-
-let location = function
-  | HTTP_1_1 resp -> Httpaf.Headers.get resp.Httpaf.Response.headers "location"
-  | H2 resp -> H2.Headers.get resp.H2.Response.headers "location"
 
 let one_request
     ?config
@@ -244,9 +262,9 @@ let one_request
     else
       single_request he ?config ?authenticator ~meth ~headers ?body uri
       >>= fun (resp, body) ->
-      match status resp with
+      match resp.status with
       | `Moved_permanently | `Found | `See_other | `Temporary_redirect ->
-        (match location resp with
+        (match Headers.get resp.headers "location" with
          | Some uri ->
            Logs.debug (fun m -> m "following redirect to %s" uri);
            follow_redirect (pred count) uri

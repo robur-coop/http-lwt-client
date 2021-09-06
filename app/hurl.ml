@@ -1,7 +1,3 @@
-let pp_response ppf = function
-  | Http_lwt_client.HTTP_1_1 resp -> Httpaf.Response.pp_hum ppf resp
-  | Http_lwt_client.H2 resp -> H2.Response.pp_hum ppf resp
-
 let jump () protocol uri meth headers output input =
   let open Rresult.R.Infix in
   let config = match protocol with
@@ -17,7 +13,8 @@ let jump () protocol uri meth headers output input =
   Lwt_main.run (
     Http_lwt_client.one_request ?config ~meth ~headers ?body uri >|= function
     | Ok (resp, body) ->
-      Format.fprintf Format.std_formatter "%a\n%!" pp_response resp;
+      Format.fprintf Format.std_formatter "%a\n%!"
+        Http_lwt_client.pp_response resp;
       (match body with
        | None -> Ok ()
        | Some data ->
