@@ -62,7 +62,7 @@ let decode_uri uri =
     is_tls, scheme, user_pass, host, port, "/" ^ String.concat "/" path
   | _ -> Error (`Msg "couldn't decode URI on top")
 
-let add_authentication ~add user_pass headers = match user_pass with
+let add_authentication ~add headers = function
   | None -> headers
   | Some (user, pass) ->
     let data = Base64.encode_string (user ^ ":" ^ pass) in
@@ -72,32 +72,27 @@ let add_authentication ~add user_pass headers = match user_pass with
 let prep_http_1_1_headers headers host user_pass blen =
   let headers = Httpaf.Headers.of_list headers in
   let add = Httpaf.Headers.add_unless_exists in
-  let headers = add headers "user-agent" ("httpaf-lwt-client/%%VERSION_NUM%%") in
+  let headers = add headers "user-agent" ("http-lwt-client/%%VERSION_NUM%%") in
   let headers = add headers "host" host in
   let headers = add headers "connection" "close" in
   let headers = match blen with
     | None -> headers
     | Some x -> add headers "content-length" (string_of_int x)
-  in 
-  add_authentication ~add:Httpaf.Headers.add user_pass headers
+  in
+  add_authentication ~add headers user_pass
 
 let prep_h2_headers headers host user_pass blen =
   let headers = H2.Headers.of_list headers in
-  let add = H2.Headers.add_unless_exists in
+  let add hdr = H2.Headers.add_unless_exists hdr ?sensitive:None in
   let headers = add headers ":authority" host in
-  let headers = match blen with
-    | None -> add headers "content-length" "0"
-    | Some x -> add headers "content-length" (string_of_int x)
-  in 
-  add_authentication ~add:(fun k v -> H2.Headers.add k v) user_pass headers
+  let headers =
+    add headers "content-length" (string_of_int (Option.value ~default:0 blen))
+  in
+  add_authentication ~add headers user_pass
 
 type response =
   | HTTP_1_1 of Httpaf.Response.t
   | H2 of H2.Response.t
-
-let read_buffer_size = function
-  | Some config -> Some config.Httpaf.Config.read_buffer_size
-  | None -> None
 
 let single_http_1_1_request ?config fd user_pass host meth path headers body =
   let blen = match body with None -> None | Some x -> Some (String.length x) in
@@ -127,17 +122,18 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
     Lwt.wakeup_later notify_finished err
   in
   let request_body, connection =
-    Httpaf.Client_connection.request ?config req ~error_handler ~response_handler in
-  Http_lwt_unix.Client_HTTP_1_1.request ?read_buffer_size:(read_buffer_size config) fd connection ;
+    Httpaf.Client_connection.request ?config req ~error_handler ~response_handler
+  in
+  let read_buffer_size = match config with
+    | Some config -> Some config.Httpaf.Config.read_buffer_size
+    | None -> None
+  in
+  Http_lwt_unix.Client_HTTP_1_1.request ?read_buffer_size fd connection ;
   (match body with
    | Some body -> Httpaf.Body.write_string request_body body
    | None -> ());
   Httpaf.Body.close_writer request_body;
   finished
-
-let read_buffer_size = function
-  | Some config -> Some config.H2.Config.read_buffer_size
-  | None -> None
 
 let single_h2_request ?config fd scheme user_pass host meth path headers body =
   let blen = match body with None -> None | Some x -> Some (String.length x) in
@@ -169,10 +165,16 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
     Lwt.wakeup_later notify_finished err
   in
   let connection =
-    H2.Client_connection.create ?config ?push_handler:None ~error_handler in
+    H2.Client_connection.create ?config ?push_handler:None ~error_handler
+  in
   let request_body =
-    H2.Client_connection.request connection req ~error_handler ~response_handler in
-  Http_lwt_unix.Client_H2.request ?read_buffer_size:(read_buffer_size config) fd connection ;
+    H2.Client_connection.request connection req ~error_handler ~response_handler
+  in
+  let read_buffer_size = match config with
+    | Some config -> Some config.H2.Config.read_buffer_size
+    | None -> None
+  in
+  Http_lwt_unix.Client_H2.request ?read_buffer_size fd connection ;
   (match body with
    | Some body -> H2.Body.write_string request_body body
    | None -> ());
@@ -194,7 +196,8 @@ let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
   let alpn_protocols = match config with
     | None -> None
     | Some (`HTTP_1_1 _) -> Some [ "http/1.1" ]
-    | Some (`H2 _) -> Some [ "h2" ] in
+    | Some (`H2 _) -> Some [ "h2" ]
+  in
   Lwt_result.lift (decode_uri uri) >>= fun (tls, scheme, user_pass, host, port, path) ->
   connect resolver ?port ?alpn_protocols ~tls ?authenticator host >>= fun fd ->
   match alpn_protocol fd, config with
