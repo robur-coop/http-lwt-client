@@ -1,6 +1,6 @@
 let pp_response ppf = function
-  | Httpaf_lwt_client.HTTP_1_1 resp -> Httpaf.Response.pp_hum ppf resp
-  | Httpaf_lwt_client.H2 resp -> H2.Response.pp_hum ppf resp
+  | Http_lwt_client.HTTP_1_1 resp -> Httpaf.Response.pp_hum ppf resp
+  | Http_lwt_client.H2 resp -> H2.Response.pp_hum ppf resp
 
 let jump () protocol uri meth headers output input =
   let open Rresult.R.Infix in
@@ -15,7 +15,7 @@ let jump () protocol uri meth headers output input =
   let meth = match meth with None -> default_meth | Some x -> x in
   let open Lwt.Infix in
   Lwt_main.run (
-    Httpaf_lwt_client.one_request ?config ~meth ~headers ?body uri >|= function
+    Http_lwt_client.one_request ?config ~meth ~headers ?body uri >|= function
     | Ok (resp, body) ->
       Format.fprintf Format.std_formatter "%a\n%!" pp_response resp;
       (match body with

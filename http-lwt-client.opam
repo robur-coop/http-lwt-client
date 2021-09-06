@@ -1,9 +1,9 @@
 opam-version: "2.0"
 maintainer: "Robur <team@robur.coop>"
 authors: ["Robur <team@robur.coop>"]
-homepage: "https://github.com/roburio/httpaf-lwt-client"
-dev-repo: "git+https://github.com/roburio/httpaf-lwt-client.git"
-bug-reports: "https://github.com/roburio/httpaf-lwt-client/issues"
+homepage: "https://github.com/roburio/http-lwt-client"
+dev-repo: "git+https://github.com/roburio/http-lwt-client.git"
+bug-reports: "https://github.com/roburio/http-lwt-client/issues"
 license: "BSD-3-clause"
 
 depends: [
@@ -28,4 +28,4 @@ build: [
   ["dune" "build" "-p" name "-j" jobs]
 ]
 
-synopsis: "A simple HTTP client using http/af and lwt"
+synopsis: "A simple HTTP client using http/af, h2, and lwt"

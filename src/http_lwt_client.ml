@@ -128,7 +128,7 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
   in
   let request_body, connection =
     Httpaf.Client_connection.request ?config req ~error_handler ~response_handler in
-  Httpaf_lwt_unix.Client_HTTP_1_1.request ?read_buffer_size:(read_buffer_size config) fd connection ;
+  Http_lwt_unix.Client_HTTP_1_1.request ?read_buffer_size:(read_buffer_size config) fd connection ;
   (match body with
    | Some body -> Httpaf.Body.write_string request_body body
    | None -> ());
@@ -172,7 +172,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
     H2.Client_connection.create ?config ?push_handler:None ~error_handler in
   let request_body =
     H2.Client_connection.request connection req ~error_handler ~response_handler in
-  Httpaf_lwt_unix.Client_H2.request ?read_buffer_size:(read_buffer_size config) fd connection ;
+  Http_lwt_unix.Client_H2.request ?read_buffer_size:(read_buffer_size config) fd connection ;
   (match body with
    | Some body -> H2.Body.write_string request_body body
    | None -> ());
