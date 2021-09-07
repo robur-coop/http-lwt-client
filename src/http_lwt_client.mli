@@ -19,5 +19,6 @@ val one_request
   -> ?headers:(string * string) list
   -> ?body:string
   -> ?max_redirect:int
+  -> ?follow_redirect:bool
   -> string
   -> (response * string option, [> `Msg of string ]) Lwt_result.t
