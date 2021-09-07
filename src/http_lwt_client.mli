@@ -12,8 +12,6 @@ type response =
 
 val pp_response : Format.formatter -> response -> unit
 
-val resolve_location : uri:string -> location:string -> string
-
 val one_request
   : ?config : [ `HTTP_1_1 of Httpaf.Config.t | `H2 of H2.Config.t ]
   -> ?authenticator:X509.Authenticator.t

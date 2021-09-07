@@ -281,7 +281,7 @@ let one_request
         single_request he ?config ?authenticator ~meth ~headers ?body uri
         >>= fun (resp, body) ->
         match resp.status with
-        | `Moved_permanently | `Found | `See_other | `Temporary_redirect ->
+        | #Status.redirection ->
           (match Headers.get resp.headers "location" with
            | Some location ->
              let uri = resolve_location ~uri ~location in
