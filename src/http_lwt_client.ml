@@ -246,17 +246,17 @@ let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
     Logs.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.");
     single_http_1_1_request fd user_pass host meth path headers body
 
-let resolve_location uri loc =
-  match String.split_on_char '/' loc with
-  | "http:" :: "" :: _ -> loc
-  | "https:" :: "" :: _ -> loc
+let resolve_location ~uri ~location =
+  match String.split_on_char '/' location with
+  | "http:" :: "" :: _ -> location
+  | "https:" :: "" :: _ -> location
   | "" :: "" :: _ ->
     let schema = String.sub uri 0 (String.index uri '/') in
-    schema ^ loc
+    schema ^ location
   | "" :: _ ->
     (match String.split_on_char '/' uri with
      | schema :: "" :: user_pass_host_port :: _ ->
-       String.concat "/" [schema ; "" ; user_pass_host_port ^ loc]
+       String.concat "/" [schema ; "" ; user_pass_host_port ^ location]
      | _ -> invalid_arg "expected an absolute uri")
   | _ -> invalid_arg "unknown location (relative path)"
 
@@ -283,8 +283,8 @@ let one_request
         match resp.status with
         | `Moved_permanently | `Found | `See_other | `Temporary_redirect ->
           (match Headers.get resp.headers "location" with
-           | Some loc ->
-             let uri = resolve_location uri loc in
+           | Some location ->
+             let uri = resolve_location ~uri ~location in
              Logs.debug (fun m -> m "following redirect to %s" uri);
              follow_redirect (pred count) uri
            | None -> Lwt_result.return (resp, body))
