@@ -4,27 +4,26 @@ let open_err r =
   let open Lwt.Infix in
   r >|= Rresult.R.open_error_msg
 
-let connect he ?port ?alpn_protocols ~tls ?authenticator host =
-  let port = match port with None -> if tls then 443 else 80 | Some p -> p in
-  open_err (Happy_eyeballs_lwt.connect he host [port]) >>= fun (_addr, socket) ->
-  if tls then
-    Lwt_result.lift (match authenticator with
-        | None -> Ca_certs.authenticator ()
-        | Some a -> Ok a) >>= fun authenticator ->
-    let config = Tls.Config.client ?alpn_protocols ~authenticator () in
+let connect he ?port ?tls_config hostname =
+  let port = match port, tls_config with
+    | None, None -> 80
+    | None, Some _ -> 443
+    | Some p, _ -> p
+  in
+  open_err (Happy_eyeballs_lwt.connect he hostname [port]) >>= fun (_addr, socket) ->
+  match tls_config with
+  | Some config ->
     Lwt.catch
       (fun () ->
          let host =
-           let open Rresult.R.Infix in
-           Rresult.R.to_option (Domain_name.of_string host >>= Domain_name.host)
+           Result.(to_option Domain_name.(bind (of_string hostname) host))
          in
          Lwt_result.ok (Tls_lwt.Unix.client_of_fd config ?host socket))
       (fun e ->
          Lwt.return (Error (`Msg ("TLS failure: " ^ Printexc.to_string e))))
     >|= fun tls ->
     `Tls tls
-  else
-    Lwt.return (Ok (`Plain socket))
+  | None -> Lwt.return (Ok (`Plain socket))
 
 let decode_uri uri =
   let open Rresult.R.Infix in
@@ -109,6 +108,14 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
   let headers = prep_http_1_1_headers headers host user_pass blen in
   let req = Httpaf.Request.create ~headers meth path in
   let finished, notify_finished = Lwt.wait () in
+  let w = ref false in
+  let wakeup v =
+    if !w then
+      Logs.err (fun m -> m "already woken up")
+    else
+      Lwt.wakeup_later notify_finished v;
+    w := true
+  in
   let on_eof response data () =
     let headers =
       H2.Headers.of_list (Httpaf.Headers.to_list response.Httpaf.Response.headers)
@@ -119,7 +126,7 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
       reason = response.Httpaf.Response.reason ;
       headers
     } in
-    Lwt.wakeup_later notify_finished (Ok (response, data))
+    wakeup (Ok (response, data))
   in
   let response_handler response response_body =
     let rec on_read on_eof data bs ~off ~len =
@@ -138,7 +145,7 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
       | `Invalid_response_body_length _ -> Error (`Msg "invalid response body length")
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
-    Lwt.wakeup_later notify_finished err
+    wakeup err
   in
   let request_body, connection =
     Httpaf.Client_connection.request ?config req ~error_handler ~response_handler
@@ -160,6 +167,14 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
   let req = H2.Request.create ~scheme ~headers meth path in
   Logs.debug (fun m -> m "Sending @[<v 0>%a@]" H2.Request.pp_hum req);
   let finished, notify_finished = Lwt.wait () in
+  let w = ref false in
+  let wakeup v =
+    if !w then
+      Logs.err (fun m -> m "already woken up task")
+    else
+      Lwt.wakeup_later notify_finished v;
+    w := true
+  in
   let on_eof response data () =
     let response : response = {
       version = { major = 2 ; minor = 0 } ;
@@ -167,7 +182,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
       reason = "" ;
       headers = response.H2.Response.headers ;
     } in
-    Lwt.wakeup_later notify_finished (Ok (response, data))
+    wakeup (Ok (response, data))
   in
   let response_handler response response_body =
     let rec on_read on_eof data bs ~off ~len =
@@ -187,7 +202,8 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
       | `Protocol_error (err, msg) -> Rresult.R.error_msgf "%a: %s" H2.Error_code.pp_hum err msg
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
-    Lwt.wakeup_later notify_finished err
+    Logs.app (fun m -> m "here %s" (match err with Ok _ -> "ok" | Error `Msg m -> m));
+    wakeup err
   in
   let connection =
     H2.Client_connection.create ?config ?push_handler:None ~error_handler
@@ -218,14 +234,14 @@ let alpn_protocol = function
       None
     | Error () -> None
 
-let single_request resolver ?config ?authenticator ~meth ~headers ?body uri =
-  let alpn_protocols = match config with
-    | None -> None
-    | Some (`HTTP_1_1 _) -> Some [ "http/1.1" ]
-    | Some (`H2 _) -> Some [ "h2" ]
-  in
+let single_request resolver ?config tls_config ~meth ~headers ?body uri =
   Lwt_result.lift (decode_uri uri) >>= fun (tls, scheme, user_pass, host, port, path) ->
-  connect resolver ?port ?alpn_protocols ~tls ?authenticator host >>= fun fd ->
+  (if tls then
+     Lwt_result.lift (Lazy.force tls_config) >|= fun config ->
+     Some config
+   else
+     Lwt_result.return None) >>= fun tls_config ->
+  connect resolver ?port ?tls_config host >>= fun fd ->
   match alpn_protocol fd, config with
   | (Some `HTTP_1_1 | None), Some (`HTTP_1_1 config) ->
     Logs.debug (fun m -> m "Start an http/1.1 connection as expected.");
@@ -260,6 +276,8 @@ let resolve_location ~uri ~location =
      | _ -> invalid_arg "expected an absolute uri")
   | _ -> invalid_arg "unknown location (relative path)"
 
+let default_auth = lazy (Ca_certs.authenticator ())
+
 let one_request
     ?config
     ?authenticator
@@ -268,17 +286,32 @@ let one_request
     ?body
     ?(max_redirect = 5)
     ?(follow_redirect = true)
+    ?(happy_eyeballs = Happy_eyeballs_lwt.create ())
     uri
   =
-  let he = Happy_eyeballs_lwt.create () in
+  let tls_config =
+    lazy
+      (let alpn_protocols = match config with
+          | None -> Some [ "h2" ; "http/1.1" ]
+          | Some (`H2 _) -> Some [ "h2" ]
+          | Some (`HTTP_1_1 _) -> Some [ "http/1.1" ]
+       and auth = match authenticator with
+         | None -> Lazy.force default_auth
+         | Some a -> Ok a
+       in
+       Result.map
+         (fun authenticator ->
+            Tls.Config.client ?alpn_protocols ~authenticator ())
+         auth)
+  in
   if not follow_redirect then
-    single_request he ?config ?authenticator ~meth ~headers ?body uri
+    single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
   else
     let rec follow_redirect count uri =
       if count = 0 then
         Lwt.return (Error (`Msg "redirect limit exceeded"))
       else
-        single_request he ?config ?authenticator ~meth ~headers ?body uri
+        single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
         >>= fun (resp, body) ->
         match resp.status with
         | #Status.redirection ->
