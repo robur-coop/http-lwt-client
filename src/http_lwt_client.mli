@@ -39,10 +39,13 @@ val pp_response : Format.formatter -> response -> unit
     followed. If [follow_redirect] is false, no redirect is followed (defaults
     to true). The default HTTP request type ([meth]) is [GET].
 
+    If no [tls_config] is provided, a default one is used, with alpn and
+    authenticators. If a [tls_config] is provided, this is used unmodified.
+
     If no [config] is provided (the default), and the [uri] uses the [https]
-    schema, application layer next protocol negotiation is used to negotiate
-    HTTP2 (prefered) or HTTP1. If the [uri] uses the [http] schema, HTTP1 is
-    used by default (unless the [config] provided is [`H2]).
+    schema, application layer next protocol negotiation (ALPN) is used to
+    negotiate HTTP2 (prefered) or HTTP1. If the [uri] uses the [http] schema,
+    HTTP1 is used by default (unless the [config] provided is [`H2]).
 
     The default [authenticator] is from the [ca-certs] opam package, which
     discovers and uses the system trust anchors.
@@ -52,6 +55,7 @@ val pp_response : Format.formatter -> response -> unit
 *)
 val one_request
   : ?config : [ `HTTP_1_1 of Httpaf.Config.t | `H2 of H2.Config.t ]
+  -> ?tls_config:Tls.Config.client
   -> ?authenticator:X509.Authenticator.t
   -> ?meth:Httpaf.Method.t
   -> ?headers:(string * string) list

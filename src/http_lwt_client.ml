@@ -2,7 +2,7 @@ open Lwt_result.Infix
 
 let open_err r =
   let open Lwt.Infix in
-  r >|= Rresult.R.open_error_msg
+  r >|= function Ok _ as r -> r | Error (`Msg _) as r -> r
 
 let connect he ?port ?tls_config hostname =
   let port = match port, tls_config with
@@ -15,10 +15,7 @@ let connect he ?port ?tls_config hostname =
   | Some config ->
     Lwt.catch
       (fun () ->
-         let host =
-           Result.(to_option Domain_name.(bind (of_string hostname) host))
-         in
-         Lwt_result.ok (Tls_lwt.Unix.client_of_fd config ?host socket))
+         Lwt_result.ok (Tls_lwt.Unix.client_of_fd config socket))
       (fun e ->
          Lwt.return (Error (`Msg ("TLS failure: " ^ Printexc.to_string e))))
     >|= fun tls ->
@@ -26,8 +23,8 @@ let connect he ?port ?tls_config hostname =
   | None -> Lwt.return (Ok (`Plain socket))
 
 let decode_uri uri =
-  let open Rresult.R.Infix in
   (* proto :// user : pass @ host : port / path *)
+  let ( >>= ) = Result.bind in
   match String.split_on_char '/' uri with
   | proto :: "" :: user_pass_host_port :: path ->
     (if String.equal proto "http:" then
@@ -57,8 +54,8 @@ let decode_uri uri =
        in
        (try Ok (host, Some (int_of_string port))
         with Failure _ -> Error (`Msg "couldn't decode port")))
-    >>| fun (host, port) ->
-    is_tls, scheme, user_pass, host, port, "/" ^ String.concat "/" path
+    >>= fun (host, port) ->
+    Ok (is_tls, scheme, user_pass, host, port, "/" ^ String.concat "/" path)
   | _ -> Error (`Msg "couldn't decode URI on top")
 
 let add_authentication ~add headers = function
@@ -199,7 +196,9 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
     let err = match e with
       | `Malformed_response x -> Error (`Msg ("malformed response: " ^ x))
       | `Invalid_response_body_length _ -> Error (`Msg "invalid response body length")
-      | `Protocol_error (err, msg) -> Rresult.R.error_msgf "%a: %s" H2.Error_code.pp_hum err msg
+      | `Protocol_error (err, msg) ->
+        let kerr _ = Error (`Msg (Format.flush_str_formatter ())) in
+        Format.kfprintf kerr Format.str_formatter "%a: %s" H2.Error_code.pp_hum err msg
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
     Logs.app (fun m -> m "here %s" (match err with Ok _ -> "ok" | Error `Msg m -> m));
@@ -237,8 +236,12 @@ let alpn_protocol = function
 let single_request resolver ?config tls_config ~meth ~headers ?body uri =
   Lwt_result.lift (decode_uri uri) >>= fun (tls, scheme, user_pass, host, port, path) ->
   (if tls then
-     Lwt_result.lift (Lazy.force tls_config) >|= fun config ->
-     Some config
+     Lwt_result.lift (Lazy.force tls_config) >|= function
+     | `Custom c -> Some c
+     | `Default config ->
+       match Result.bind (Domain_name.of_string host) Domain_name.host with
+       | Ok peer -> Some (Tls.Config.peer config peer)
+       | Error _ -> Some config
    else
      Lwt_result.return None) >>= fun tls_config ->
   connect resolver ?port ?tls_config host >>= fun fd ->
@@ -280,6 +283,7 @@ let default_auth = lazy (Ca_certs.authenticator ())
 
 let one_request
     ?config
+    ?tls_config
     ?authenticator
     ?(meth = `GET)
     ?(headers = [])
@@ -289,20 +293,23 @@ let one_request
     ?(happy_eyeballs = Happy_eyeballs_lwt.create ())
     uri
   =
-  let tls_config =
+  let tls_config : ([`Custom of Tls.Config.client | `Default of Tls.Config.client ], [> `Msg of string ]) result Lazy.t =
     lazy
-      (let alpn_protocols = match config with
-          | None -> Some [ "h2" ; "http/1.1" ]
-          | Some (`H2 _) -> Some [ "h2" ]
-          | Some (`HTTP_1_1 _) -> Some [ "http/1.1" ]
-       and auth = match authenticator with
-         | None -> Lazy.force default_auth
-         | Some a -> Ok a
-       in
-       Result.map
-         (fun authenticator ->
-            Tls.Config.client ?alpn_protocols ~authenticator ())
-         auth)
+      (match tls_config with
+       | Some cfg -> Ok (`Custom cfg)
+       | None ->
+         let alpn_protocols = match config with
+            | None -> [ "h2" ; "http/1.1" ]
+            | Some (`H2 _) -> [ "h2" ]
+            | Some (`HTTP_1_1 _) -> [ "http/1.1" ]
+         and auth = match authenticator with
+           | None -> Lazy.force default_auth
+           | Some a -> Ok a
+         in
+         Result.map
+           (fun authenticator ->
+              `Default (Tls.Config.client ~alpn_protocols ~authenticator ()))
+           auth)
   in
   if not follow_redirect then
     single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
