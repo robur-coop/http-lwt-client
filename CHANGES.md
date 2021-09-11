@@ -1,3 +1,12 @@
+## v0.0.4 (2021-09-11)
+
+* Add ?happy_eyeballs to Http_lwt_client.one_request to allow reusing this
+  state across requests
+* Initialize Ca_certs.authenticator only once (lazily) to avoid decoding
+  trust anchors multiple times
+* Fix Http_lwt_unix.Buffer for resizing on put (to avoid errors with H2)
+* Avoid exceptions from Lwt.wakeup_later by calling it at most once
+
 ## v0.0.3 (2021-09-07)
 
 * Fix following redirects if location is relative or schema-relative
