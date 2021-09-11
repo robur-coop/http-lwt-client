@@ -1,5 +1,6 @@
 ## v0.0.4 (2021-09-11)
 
+* Avoid exception in resolve_location
 * Add ?happy_eyeballs to Http_lwt_client.one_request to allow reusing this
   state across requests
 * Initialize Ca_certs.authenticator only once (lazily) to avoid decoding
