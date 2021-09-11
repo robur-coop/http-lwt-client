@@ -43,7 +43,7 @@ module Buffer : sig
   val put : t -> f:(Lwt_bytes.t -> off:int -> len:int -> int Lwt.t) -> int Lwt.t
 end = struct
   type t =
-    { buffer      : Lwt_bytes.t
+    { mutable buffer : Lwt_bytes.t
     ; mutable off : int
     ; mutable len : int }
 
@@ -72,7 +72,13 @@ end = struct
 
   let put t ~f =
     compress t;
-    f t.buffer ~off:(t.off + t.len) ~len:(Lwt_bytes.length t.buffer - t.len)
+    let off = t.off + t.len in
+    let buf = t.buffer in
+    if Lwt_bytes.length buf = t.len then begin
+      t.buffer <- Lwt_bytes.create (2 * Lwt_bytes.length buf);
+      Lwt_bytes.blit buf t.off t.buffer 0 t.len;
+    end;
+    f t.buffer ~off ~len:(Lwt_bytes.length t.buffer - off)
     >>= fun n ->
     t.len <- t.len + n;
     Lwt.return n
