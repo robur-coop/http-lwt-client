@@ -264,17 +264,17 @@ let single_request resolver ?config tls_config ~meth ~headers ?body uri =
 
 let resolve_location ~uri ~location =
   match String.split_on_char '/' location with
-  | "http:" :: "" :: _ -> location
-  | "https:" :: "" :: _ -> location
+  | "http:" :: "" :: _ -> Ok location
+  | "https:" :: "" :: _ -> Ok location
   | "" :: "" :: _ ->
     let schema = String.sub uri 0 (String.index uri '/') in
-    schema ^ location
+    Ok (schema ^ location)
   | "" :: _ ->
     (match String.split_on_char '/' uri with
      | schema :: "" :: user_pass_host_port :: _ ->
-       String.concat "/" [schema ; "" ; user_pass_host_port ^ location]
-     | _ -> invalid_arg "expected an absolute uri")
-  | _ -> invalid_arg "unknown location (relative path)"
+       Ok (String.concat "/" [schema ; "" ; user_pass_host_port ^ location])
+     | _ -> Error (`Msg ("expected an absolute uri, got: " ^ uri)))
+  | _ -> Error (`Msg ("unknown location (relative path): " ^ location))
 
 let default_auth = lazy (Ca_certs.authenticator ())
 
@@ -317,7 +317,7 @@ let one_request
         | #Status.redirection ->
           (match Headers.get resp.headers "location" with
            | Some location ->
-             let uri = resolve_location ~uri ~location in
+             Lwt_result.lift (resolve_location ~uri ~location) >>= fun uri ->
              Logs.debug (fun m -> m "following redirect to %s" uri);
              follow_redirect (pred count) uri
            | None -> Lwt_result.return (resp, body))
