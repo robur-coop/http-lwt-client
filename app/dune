@@ -2,4 +2,4 @@
   (name hurl)
   (public_name hurl)
   (libraries http-lwt-client lwt.unix logs.fmt fmt.cli logs.cli fmt.tty
-             cmdliner bos rresult))
+             cmdliner bos))

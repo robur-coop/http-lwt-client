@@ -12,7 +12,6 @@ depends: [
   "cmdliner"
   "logs"
   "lwt"
-  "rresult"
   "base64" {>= "3.1.0"}
   "faraday-lwt-unix"
   "httpaf" {>= "0.7.0"}
