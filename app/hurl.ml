@@ -1,13 +1,17 @@
 let jump () protocol uri meth headers output input =
-  let open Rresult.R.Infix in
+  let (let*) = Result.bind in
   let config = match protocol with
     | None -> None
     | Some `HTTP_1_1 -> Some (`HTTP_1_1 Httpaf.Config.default)
-    | Some `H2 -> Some (`H2 H2.Config.default) in
-  (match input with
-   | None -> Ok (None, `GET)
-   | Some fn -> Bos.OS.File.read (Fpath.v fn) >>| fun d -> (Some d, `POST))
-  >>= fun (body, default_meth) ->
+    | Some `H2 -> Some (`H2 H2.Config.default)
+  in
+  let* body, default_meth =
+    match input with
+    | None -> Ok (None, `GET)
+    | Some fn ->
+      let* d = Bos.OS.File.read (Fpath.v fn) in
+      Ok (Some d, `POST)
+  in
   let meth = match meth with None -> default_meth | Some x -> x in
   let open Lwt.Infix in
   Lwt_main.run (
