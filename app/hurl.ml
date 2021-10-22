@@ -1,5 +1,5 @@
 let jump () protocol uri meth headers output input =
-  let (let*) = Result.bind in
+  let ( let* ) = Result.bind in
   let config = match protocol with
     | None -> None
     | Some `HTTP_1_1 -> Some (`HTTP_1_1 Httpaf.Config.default)
