@@ -1,3 +1,7 @@
+## v0.0.5 (2021-10-30)
+
+* remove rresult dependency (#6 @hannesm @reynir)
+
 ## v0.0.4 (2021-09-11)
 
 * Add ?tls_config to Http_lwt_client.one_request to enable passing an entire
