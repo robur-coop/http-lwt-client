@@ -83,7 +83,10 @@ let meth =
   Arg.(value & opt (some (enum ms)) None & info [ "method" ] ~doc ~docv:"METHOD")
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ protocol $ uri $ meth $ header $ input $ output)),
-  Term.info "hurl" ~version:"%%VERSION_NUM%%"
+  let term =
+    Term.(term_result (const jump $ setup_log $ protocol $ uri $ meth $ header $ input $ output))
+  and info = Cmd.info "hurl" ~version:"%%VERSION_NUM%%"
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)
