@@ -1,3 +1,7 @@
+## v0.0.7 (2022-08-25)
+
+* upgrade to h2 0.9.0 API (#10 @hannesm)
+
 ## v0.0.6 (2022-03-16)
 
 * upgrade to cmdliner 1.1.0 API (@hannesm)
