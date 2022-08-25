@@ -184,11 +184,11 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
   let response_handler response response_body =
     let rec on_read on_eof data bs ~off ~len =
       let data = data ^ Bigstringaf.substring ~off ~len bs in
-      H2.Body.schedule_read response_body
+      H2.Body.Reader.schedule_read response_body
         ~on_read:(on_read on_eof data)
         ~on_eof:(on_eof response (Some data))
     in
-    H2.Body.schedule_read response_body
+    H2.Body.Reader.schedule_read response_body
       ~on_read:(on_read on_eof "")
       ~on_eof:(on_eof response None)
   in
@@ -216,9 +216,9 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
   in
   Http_lwt_unix.Client_H2.request ?read_buffer_size fd connection ;
   (match body with
-   | Some body -> H2.Body.write_string request_body body
+   | Some body -> H2.Body.Writer.write_string request_body body
    | None -> ());
-  H2.Body.close_writer request_body;
+  H2.Body.Writer.close request_body;
   finished
 
 let alpn_protocol = function
