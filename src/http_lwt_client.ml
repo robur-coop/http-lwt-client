@@ -320,14 +320,14 @@ let one_request
       else
         single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
         >>= fun (resp, body) ->
-        match resp.status with
-        | #Status.redirection ->
+        if Status.is_redirection resp.status then
           (match Headers.get resp.headers "location" with
            | Some location ->
              Lwt_result.lift (resolve_location ~uri ~location) >>= fun uri ->
              Logs.debug (fun m -> m "following redirect to %s" uri);
              follow_redirect (pred count) uri
            | None -> Lwt_result.return (resp, body))
-        | _ -> Lwt_result.return (resp, body)
+        else
+          Lwt_result.return (resp, body)
     in
     follow_redirect max_redirect uri
