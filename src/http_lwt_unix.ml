@@ -135,7 +135,7 @@ module Make (Runtime : RUNTIME) = struct
         match Runtime.next_read_operation connection with
         | `Yield ->
           Runtime.yield_reader connection read_loop ;
-          Lwt.return_unit
+          Lwt.pause ()
         | `Read ->
           read socket read_buffer >>= begin function
           | `Eof ->
@@ -147,7 +147,7 @@ module Make (Runtime : RUNTIME) = struct
             Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
               Runtime.read connection bigstring ~off ~len)
             |> ignore;
-            read_loop_step ()
+            Lwt.pause () >>= read_loop_step
           end
 
         | `Close ->
@@ -196,11 +196,11 @@ module Make (Runtime : RUNTIME) = struct
         | `Write io_vectors ->
           writev io_vectors >>= fun result ->
           Runtime.report_write_result connection result;
-          write_loop_step ()
+          Lwt.pause () >>= write_loop_step
 
         | `Yield ->
           Runtime.yield_writer connection write_loop;
-          Lwt.return_unit
+          Lwt.pause ()
 
         | `Close _ ->
           Lwt.wakeup_later notify_write_loop_exited ();
