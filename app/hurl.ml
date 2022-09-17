@@ -1,4 +1,4 @@
-let jump () protocol uri meth headers output input =
+let jump () protocol uri meth headers output input no_follow =
   let ( let* ) = Result.bind in
   let config = match protocol with
     | None -> None
@@ -14,8 +14,8 @@ let jump () protocol uri meth headers output input =
   in
   let meth = match meth with None -> default_meth | Some x -> x in
   let open Lwt.Infix in
-  Lwt_main.run (
-    Http_lwt_client.one_request ?config ~meth ~headers ?body uri >|= function
+  Lwt_main.run ((
+    Http_lwt_client.one_request ?config ~meth ~headers ?body ~follow_redirect:(not no_follow) uri >|= function
     | Ok (resp, body) ->
       Format.fprintf Format.std_formatter "%a\n%!"
         Http_lwt_client.pp_response resp;
@@ -27,7 +27,9 @@ let jump () protocol uri meth headers output input =
          | Some fn -> Bos.OS.File.write (Fpath.v fn) data)
     | Error `Msg msg as e ->
       Logs.err (fun m -> m "error %s" msg);
-      e)
+      e) >|= fun r ->
+     Unix.sleep 100;
+     r)
 
 let setup_log style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer ();
@@ -82,9 +84,13 @@ let meth =
   ] in
   Arg.(value & opt (some (enum ms)) None & info [ "method" ] ~doc ~docv:"METHOD")
 
+let not_follow_redirect =
+  let doc = "Do not follow HTTP redirects" in
+  Arg.(value & flag (info ~doc [ "no-follow" ]))
+
 let cmd =
   let term =
-    Term.(term_result (const jump $ setup_log $ protocol $ uri $ meth $ header $ input $ output))
+    Term.(term_result (const jump $ setup_log $ protocol $ uri $ meth $ header $ input $ output $ not_follow_redirect))
   and info = Cmd.info "hurl" ~version:"%%VERSION_NUM%%"
   in
   Cmd.v info term
