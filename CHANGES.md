@@ -1,3 +1,11 @@
+## v0.0.8 (2022-09-17)
+
+* use Status.is_redirection instead of a match on the polymorphic variant, to
+  support unknown 3xx codes (such as 308) (#11 @hannesm)
+* add some yield in the main loop to allow concurrency with other fibers (issue
+  #12 by @kit-ty-kate, fixed in #13 by @dinosaure)
+* hurl: add a no-follow flag (@hannesm)
+
 ## v0.0.7 (2022-08-25)
 
 * upgrade to h2 0.9.0 API (#10 @hannesm)
