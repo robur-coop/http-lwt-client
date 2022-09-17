@@ -71,9 +71,9 @@ let prep_http_1_1_headers headers host user_pass blen =
   let headers = add headers "user-agent" ("http-lwt-client/%%VERSION_NUM%%") in
   let headers = add headers "host" host in
   let headers = add headers "connection" "close" in
-  let headers = match blen with
-    | None -> headers
-    | Some x -> add headers "content-length" (string_of_int x)
+  let headers =
+    add headers "content-length"
+      (string_of_int (Option.value ~default:0 blen))
   in
   add_authentication ~add headers user_pass
 
@@ -82,7 +82,8 @@ let prep_h2_headers headers host user_pass blen =
   let add hdr = H2.Headers.add_unless_exists hdr ?sensitive:None in
   let headers = add headers ":authority" host in
   let headers =
-    add headers "content-length" (string_of_int (Option.value ~default:0 blen))
+    add headers "content-length"
+      (string_of_int (Option.value ~default:0 blen))
   in
   add_authentication ~add headers user_pass
 
@@ -100,8 +101,8 @@ let pp_response ppf { version ; status ; reason ; headers } =
   Format.fprintf ppf "((version \"%a\") (status %a) (reason %S) (headers %a))"
     Version.pp_hum version Status.pp_hum status reason Headers.pp_hum headers
 
-let single_http_1_1_request ?config fd user_pass host meth path headers body =
-  let blen = match body with None -> None | Some x -> Some (String.length x) in
+let single_http_1_1_request ?config fd user_pass host meth path headers body f f_init =
+  let blen = Option.map String.length body in
   let headers = prep_http_1_1_headers headers host user_pass blen in
   let req = Httpaf.Request.create ~headers meth path in
   let finished, notify_finished = Lwt.wait () in
@@ -126,15 +127,20 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
     wakeup (Ok (response, data))
   in
   let response_handler response response_body =
+    let open Lwt.Infix in
     let rec on_read on_eof data bs ~off ~len =
-      let data = data ^ Bigstringaf.substring ~off ~len bs in
+      let data =
+        data >>= fun data ->
+        f data (Bigstringaf.substring ~off ~len bs)
+      in
       Httpaf.Body.schedule_read response_body
         ~on_read:(on_read on_eof data)
-        ~on_eof:(on_eof response (Some data))
+        ~on_eof:(on_eof response data)
     in
+    let f_init = Lwt.return f_init in
     Httpaf.Body.schedule_read response_body
-      ~on_read:(on_read on_eof "")
-      ~on_eof:(on_eof response None)
+      ~on_read:(on_read on_eof f_init)
+      ~on_eof:(on_eof response f_init)
   in
   let error_handler e =
     let err = match e with
@@ -158,8 +164,8 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body =
   Httpaf.Body.close_writer request_body;
   finished
 
-let single_h2_request ?config fd scheme user_pass host meth path headers body =
-  let blen = match body with None -> None | Some x -> Some (String.length x) in
+let single_h2_request ?config fd scheme user_pass host meth path headers body f f_init =
+  let blen = Option.map String.length body in
   let headers = prep_h2_headers headers host user_pass blen in
   let req = H2.Request.create ~scheme ~headers meth path in
   Logs.debug (fun m -> m "Sending @[<v 0>%a@]" H2.Request.pp_hum req);
@@ -182,15 +188,20 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body =
     wakeup (Ok (response, data))
   in
   let response_handler response response_body =
+    let open Lwt.Infix in
     let rec on_read on_eof data bs ~off ~len =
-      let data = data ^ Bigstringaf.substring ~off ~len bs in
+      let data =
+        data >>= fun data ->
+        f data (Bigstringaf.substring ~off ~len bs)
+      in
       H2.Body.Reader.schedule_read response_body
         ~on_read:(on_read on_eof data)
-        ~on_eof:(on_eof response (Some data))
+        ~on_eof:(on_eof response data)
     in
+    let f_init = Lwt.return f_init in
     H2.Body.Reader.schedule_read response_body
-      ~on_read:(on_read on_eof "")
-      ~on_eof:(on_eof response None)
+      ~on_read:(on_read on_eof f_init)
+      ~on_eof:(on_eof response f_init)
   in
   let error_handler e =
     let err = match e with
@@ -233,7 +244,7 @@ let alpn_protocol = function
       None
     | Error () -> None
 
-let single_request resolver ?config tls_config ~meth ~headers ?body uri =
+let single_request resolver ?config tls_config ~meth ~headers ?body uri f f_init =
   Lwt_result.lift (decode_uri uri) >>= fun (tls, scheme, user_pass, host, port, path) ->
   (if tls then
      Lwt_result.lift (Lazy.force tls_config) >|= function
@@ -245,25 +256,27 @@ let single_request resolver ?config tls_config ~meth ~headers ?body uri =
    else
      Lwt_result.return None) >>= fun tls_config ->
   connect resolver ?port ?tls_config host >>= fun fd ->
-  match alpn_protocol fd, config with
+  begin match alpn_protocol fd, config with
   | (Some `HTTP_1_1 | None), Some (`HTTP_1_1 config) ->
     Logs.debug (fun m -> m "Start an http/1.1 connection as expected.");
-    single_http_1_1_request ~config fd user_pass host meth path headers body
+    single_http_1_1_request ~config fd user_pass host meth path headers body f f_init
   | (Some `HTTP_1_1 | None), None ->
     Logs.debug (fun m -> m "Start an http/1.1 connection by default.");
-    single_http_1_1_request fd user_pass host meth path headers body
+    single_http_1_1_request fd user_pass host meth path headers body f f_init
   | (Some `H2 | None), Some (`H2 config) ->
     Logs.debug (fun m -> m "Start an h2 connection as expected.");
-    single_h2_request ~config fd scheme user_pass host meth path headers body
+    single_h2_request ~config fd scheme user_pass host meth path headers body f f_init
   | Some `H2, None ->
     Logs.debug (fun m -> m "Start an h2 connection as requested by the server.");
-    single_h2_request fd scheme user_pass host meth path headers body
+    single_h2_request fd scheme user_pass host meth path headers body f f_init
   | Some `H2, Some (`HTTP_1_1 _config) ->
     Logs.warn (fun m -> m "Initiate an h2 connection despite a requested http/1.1 connection.");
-    single_h2_request fd scheme user_pass host meth path headers body
+    single_h2_request fd scheme user_pass host meth path headers body f f_init
   | Some `HTTP_1_1, Some (`H2 _config) ->
     Logs.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.");
-    single_http_1_1_request fd user_pass host meth path headers body
+    single_http_1_1_request fd user_pass host meth path headers body f f_init
+  end >>= fun (resp, body) ->
+  Lwt.map (fun body -> Ok (resp, body)) body
 
 let resolve_location ~uri ~location =
   match String.split_on_char '/' location with
@@ -281,7 +294,7 @@ let resolve_location ~uri ~location =
 
 let default_auth = lazy (Ca_certs.authenticator ())
 
-let one_request
+let request
     ?config
     ?tls_config
     ?authenticator
@@ -292,6 +305,7 @@ let one_request
     ?(follow_redirect = true)
     ?(happy_eyeballs = Happy_eyeballs_lwt.create ())
     uri
+    f f_init
   =
   let tls_config : ([`Custom of Tls.Config.client | `Default of Tls.Config.client ], [> `Msg of string ]) result Lazy.t =
     lazy
@@ -312,13 +326,13 @@ let one_request
            auth)
   in
   if not follow_redirect then
-    single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
+    single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri f f_init
   else
     let rec follow_redirect count uri =
       if count = 0 then
         Lwt.return (Error (`Msg "redirect limit exceeded"))
       else
-        single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri
+        single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri f f_init
         >>= fun (resp, body) ->
         if Status.is_redirection resp.status then
           (match Headers.get resp.headers "location" with

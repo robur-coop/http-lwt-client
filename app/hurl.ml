@@ -1,10 +1,11 @@
-let jump () protocol uri meth headers output input no_follow =
+let jump () protocol uri meth headers input output no_follow =
   let ( let* ) = Result.bind in
   let config = match protocol with
     | None -> None
     | Some `HTTP_1_1 -> Some (`HTTP_1_1 Httpaf.Config.default)
     | Some `H2 -> Some (`H2 H2.Config.default)
   in
+  let open Lwt.Infix in
   let* body, default_meth =
     match input with
     | None -> Ok (None, `GET)
@@ -13,23 +14,31 @@ let jump () protocol uri meth headers output input no_follow =
       Ok (Some d, `POST)
   in
   let meth = match meth with None -> default_meth | Some x -> x in
-  let open Lwt.Infix in
-  Lwt_main.run ((
-    Http_lwt_client.one_request ?config ~meth ~headers ?body ~follow_redirect:(not no_follow) uri >|= function
-    | Ok (resp, body) ->
-      Format.fprintf Format.std_formatter "%a\n%!"
-        Http_lwt_client.pp_response resp;
-      (match body with
-       | None -> Ok ()
-       | Some data ->
-         match output with
-         | None -> Format.fprintf Format.std_formatter "%s\n%!" data ; Ok ()
-         | Some fn -> Bos.OS.File.write (Fpath.v fn) data)
-    | Error `Msg msg as e ->
-      Logs.err (fun m -> m "error %s" msg);
-      e) >|= fun r ->
-     Unix.sleep 100;
-     r)
+  Lwt_main.run (
+    let fd, close = match output with
+      | None -> Unix.stdout, fun () -> ()
+      | Some fn ->
+        let fd = Unix.openfile fn [ Unix.O_WRONLY ] 0o644 in
+        fd, fun () -> Unix.close fd
+    in
+    let reply () data =
+      let bytes = Bytes.of_string data in
+      let blen = String.length data in
+      let written = Unix.write fd bytes 0 blen in
+      if written <> blen then
+        Printf.printf "couldn't fully write (%d of %d bytes)" written blen;
+      Lwt.return_unit
+    in
+    (Http_lwt_client.request ?config ~meth ~headers ?body ~follow_redirect:(not no_follow) uri reply () >|= function
+      | Ok (resp, ()) ->
+        Format.fprintf Format.std_formatter "\n%a\n%!"
+          Http_lwt_client.pp_response resp;
+        Ok ()
+      | Error `Msg msg as e ->
+        Logs.err (fun m -> m "error %s" msg);
+        e) >|= fun r ->
+    close ();
+    r)
 
 let setup_log style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer ();
