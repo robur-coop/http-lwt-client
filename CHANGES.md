@@ -1,3 +1,10 @@
+## v0.1.0 (2022-10-25)
+
+* Add function "request", remove "one_request". The response body is a stream
+  now to support responses where the body exceeds the memory (or maximum string
+  length) (#14 @kit-ty-kate)
+* BUGFIX hurl had "input" and "output" switched (#14 @hannesm)
+
 ## v0.0.8 (2022-09-17)
 
 * use Status.is_redirection instead of a match on the polymorphic variant, to
