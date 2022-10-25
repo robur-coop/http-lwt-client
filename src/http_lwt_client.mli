@@ -33,11 +33,15 @@ type response =
 (** [pp_response ppf response] pretty-prints the [response] on [ppf]. *)
 val pp_response : Format.formatter -> response -> unit
 
-(** [one_request ~config ~authenticator ~meth ~headers ~body ~max_redirect
-    ~follow_redirect ~happy_eyeballs uri] does a single request of [uri] and
-    returns the response. By default, up to 5 redirects ([max_redirect]) are
-    followed. If [follow_redirect] is false, no redirect is followed (defaults
-    to true). The default HTTP request type ([meth]) is [GET].
+(** [request ~config ~authenticator ~meth ~headers ~body ~max_redirect
+    ~follow_redirect ~happy_eyeballs uri f init] does a single request of [uri]
+    and returns the response. Each time part of the body is received,
+    [f acc part] is called, with [acc] being the last return value of [f]
+    (or [init] if it is the first time) and [part] being the body part received.
+
+    By default, up to 5 redirects ([max_redirect]) are followed.
+    If [follow_redirect] is false, no redirect is followed (defaults to true).
+    The default HTTP request type ([meth]) is [GET].
 
     If no [tls_config] is provided, a default one is used, with alpn and
     authenticators. If a [tls_config] is provided, this is used unmodified.
@@ -53,7 +57,7 @@ val pp_response : Format.formatter -> response -> unit
     The [happy-eyeballs] opam package is used to establish the TCP connection,
     which prefers IPv6 over IPv4.
 *)
-val one_request
+val request
   : ?config : [ `HTTP_1_1 of Httpaf.Config.t | `H2 of H2.Config.t ]
   -> ?tls_config:Tls.Config.client
   -> ?authenticator:X509.Authenticator.t
@@ -64,4 +68,6 @@ val one_request
   -> ?follow_redirect:bool
   -> ?happy_eyeballs:Happy_eyeballs_lwt.t
   -> string
-  -> (response * string option, [> `Msg of string ]) Lwt_result.t
+  -> ('a -> string -> 'a Lwt.t)
+  -> 'a
+  -> (response * 'a, [> `Msg of string ]) Lwt_result.t
