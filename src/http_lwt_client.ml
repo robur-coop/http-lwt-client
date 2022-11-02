@@ -114,28 +114,28 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body f f
       Lwt.wakeup_later notify_finished v;
     w := true
   in
-  let on_eof response data () =
-    let headers =
-      H2.Headers.of_list (Httpaf.Headers.to_list response.Httpaf.Response.headers)
-    in
-    let response : response = {
-      version = response.Httpaf.Response.version ;
-      status = (response.Httpaf.Response.status :> H2.Status.t) ;
-      reason = response.Httpaf.Response.reason ;
-      headers
-    } in
-    wakeup (Ok (response, data))
+  let on_eof response data () = wakeup (Ok (response, data))
   in
   let response_handler response response_body =
+    let response : response =
+      {
+        version = response.Httpaf.Response.version ;
+        status = (response.Httpaf.Response.status :> H2.Status.t) ;
+        reason = response.Httpaf.Response.reason ;
+        headers =
+          H2.Headers.of_list
+            (Httpaf.Headers.to_list response.Httpaf.Response.headers)
+      }
+    in
     let open Lwt.Infix in
-    let rec on_read on_eof data bs ~off ~len =
-      let data =
-        data >>= fun data ->
-        f data (Bigstringaf.substring ~off ~len bs)
+    let rec on_read on_eof acc bs ~off ~len =
+      let acc =
+        acc >>= fun acc ->
+        f response acc (Bigstringaf.substring ~off ~len bs)
       in
       Httpaf.Body.schedule_read response_body
-        ~on_read:(on_read on_eof data)
-        ~on_eof:(on_eof response data)
+        ~on_read:(on_read on_eof acc)
+        ~on_eof:(on_eof response acc)
     in
     let f_init = Lwt.return f_init in
     Httpaf.Body.schedule_read response_body
@@ -178,25 +178,24 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
       Lwt.wakeup_later notify_finished v;
     w := true
   in
-  let on_eof response data () =
+  let on_eof response data () = wakeup (Ok (response, data))
+  in
+  let response_handler response response_body =
     let response : response = {
       version = { major = 2 ; minor = 0 } ;
       status = response.H2.Response.status ;
       reason = "" ;
       headers = response.H2.Response.headers ;
     } in
-    wakeup (Ok (response, data))
-  in
-  let response_handler response response_body =
     let open Lwt.Infix in
-    let rec on_read on_eof data bs ~off ~len =
-      let data =
-        data >>= fun data ->
-        f data (Bigstringaf.substring ~off ~len bs)
+    let rec on_read on_eof acc bs ~off ~len =
+      let acc =
+        acc >>= fun acc ->
+        f response acc (Bigstringaf.substring ~off ~len bs)
       in
       H2.Body.Reader.schedule_read response_body
-        ~on_read:(on_read on_eof data)
-        ~on_eof:(on_eof response data)
+        ~on_read:(on_read on_eof acc)
+        ~on_eof:(on_eof response acc)
     in
     let f_init = Lwt.return f_init in
     H2.Body.Reader.schedule_read response_body
