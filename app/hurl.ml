@@ -21,7 +21,7 @@ let jump () protocol uri meth headers input output no_follow =
         let fd = Unix.openfile fn [ Unix.O_WRONLY ] 0o644 in
         fd, fun () -> Unix.close fd
     in
-    let reply () data =
+    let reply _response () data =
       let bytes = Bytes.of_string data in
       let blen = String.length data in
       let written = Unix.write fd bytes 0 blen in

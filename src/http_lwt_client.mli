@@ -68,6 +68,6 @@ val request
   -> ?follow_redirect:bool
   -> ?happy_eyeballs:Happy_eyeballs_lwt.t
   -> string
-  -> ('a -> string -> 'a Lwt.t)
+  -> (response -> 'a -> string -> 'a Lwt.t)
   -> 'a
   -> (response * 'a, [> `Msg of string ]) Lwt_result.t
