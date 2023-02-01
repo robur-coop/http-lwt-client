@@ -129,9 +129,12 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body f f
     in
     let open Lwt.Infix in
     let rec on_read on_eof acc bs ~off ~len =
+      (* XXX(dinosaure): we must do the copy before the [>>=].
+         [Httpaf] will re-use [bs] then. *)
+      let str = Bigstringaf.substring ~off ~len bs in
       let acc =
         acc >>= fun acc ->
-        f response acc (Bigstringaf.substring ~off ~len bs)
+        f response acc str
       in
       Httpaf.Body.schedule_read response_body
         ~on_read:(on_read on_eof acc)
@@ -189,9 +192,12 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
     } in
     let open Lwt.Infix in
     let rec on_read on_eof acc bs ~off ~len =
+      (* XXX(dinosaure): we must do the copy before the [>>=].
+         [H2] will re-use [bs] then. *)
+      let str = Bigstringaf.substring bs ~off ~len in
       let acc =
         acc >>= fun acc ->
-        f response acc (Bigstringaf.substring ~off ~len bs)
+        f response acc str
       in
       H2.Body.Reader.schedule_read response_body
         ~on_read:(on_read on_eof acc)
