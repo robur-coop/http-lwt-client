@@ -1,3 +1,7 @@
+## v0.2.1 (2023-01-02)
+
+* Fix ownership of buffers given by the HTTP scheduler (#16 by @dinosaure)
+
 ## v0.2.0 (2022-11-03)
 
 * API: In the body function passed to request, the response is the first
