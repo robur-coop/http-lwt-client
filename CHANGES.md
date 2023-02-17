@@ -1,3 +1,7 @@
+## v0.2.2 (2023-02-17)
+
+* Update to tls 0.16.0 package split: tls.lwt is now tls-lwt (#17 by @hannesm)
+
 ## v0.2.1 (2023-01-02)
 
 * Fix ownership of buffers given by the HTTP scheduler (#16 by @dinosaure)
