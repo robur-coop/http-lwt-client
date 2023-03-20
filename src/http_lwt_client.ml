@@ -221,7 +221,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
     wakeup err
   in
   let connection =
-    H2.Client_connection.create ?config ?push_handler:None ~error_handler
+    H2.Client_connection.create ?config ?push_handler:None ~error_handler ()
   in
   let request_body =
     H2.Client_connection.request connection req ~error_handler ~response_handler
