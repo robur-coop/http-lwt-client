@@ -1,3 +1,7 @@
+## v0.2.3 (2023-03-20)
+
+* Adapt to h2 0.10.0 API change (#18 by @hannesm)
+
 ## v0.2.2 (2023-02-17)
 
 * Update to tls 0.16.0 package split: tls.lwt is now tls-lwt (#17 by @hannesm)
