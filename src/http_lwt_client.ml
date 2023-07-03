@@ -78,7 +78,8 @@ let prep_http_1_1_headers headers host user_pass blen =
   add_authentication ~add headers user_pass
 
 let prep_h2_headers headers host user_pass blen =
-  let headers = H2.Headers.of_list headers in
+  let headers = List.rev_map (fun (k, v) -> (String.lowercase_ascii k, v)) headers in
+  let headers = H2.Headers.of_rev_list headers in
   let add hdr = H2.Headers.add_unless_exists hdr ?sensitive:None in
   let headers = add headers ":authority" host in
   let headers =
