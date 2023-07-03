@@ -1,3 +1,8 @@
+## v0.2.4 (2023-07-03)
+
+* In HTTP/2, always lowercase the header keys (#19 by @ScoreUnder,
+  fixes #7 by @kit-ty-kate)
+
 ## v0.2.3 (2023-03-20)
 
 * Adapt to h2 0.10.0 API change (#18 by @hannesm)
