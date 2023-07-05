@@ -1,3 +1,7 @@
+## v0.2.5 (2023-07-05)
+
+* Order http2 headers appropriately to avoid malformed requests (#20, @hannesm)
+
 ## v0.2.4 (2023-07-03)
 
 * In HTTP/2, always lowercase the header keys (#19 by @ScoreUnder,
