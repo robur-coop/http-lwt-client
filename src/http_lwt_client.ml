@@ -1,5 +1,8 @@
 open Lwt_result.Infix
 
+let src = Logs.Src.create "http_lwt_client" ~doc:"HTTP client"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let open_err r =
   let open Lwt.Infix in
   r >|= function Ok _ as r -> r | Error (`Msg _) as r -> r
@@ -65,10 +68,12 @@ let add_authentication ~add headers = function
     let s = "Basic " ^ data in
     add headers "authorization" s
 
+let user_agent = "http-lwt-client/%%VERSION_NUM%%"
+
 let prep_http_1_1_headers headers host user_pass blen =
   let headers = Httpaf.Headers.of_list headers in
   let add = Httpaf.Headers.add_unless_exists in
-  let headers = add headers "user-agent" ("http-lwt-client/%%VERSION_NUM%%") in
+  let headers = add headers "user-agent" user_agent in
   let headers = add headers "host" host in
   let headers = add headers "connection" "close" in
   let headers =
@@ -78,15 +83,42 @@ let prep_http_1_1_headers headers host user_pass blen =
   add_authentication ~add headers user_pass
 
 let prep_h2_headers headers host user_pass blen =
+  (* please note, that h2 (at least in version 0.10.0) encodes the headers
+     in reverse order ; and for http/2 compatibility we need to retain the
+     :authority pseudo-header first (after method/scheme/... that are encoded
+     specially *)
+  (* also note that "host" is no longer a thing, but :authority is -- so if
+     we find a host header, we'll rephrase that as authority. *)
   let headers = List.rev_map (fun (k, v) -> (String.lowercase_ascii k, v)) headers in
   let headers = H2.Headers.of_rev_list headers in
+  let headers, authority =
+    match
+      H2.Headers.get headers "host",
+      H2.Headers.get headers ":authority"
+    with
+    | None, None -> headers, host
+    | Some h, None ->
+      Log.debug (fun m -> m "removing host header (inserting authority instead)");
+      H2.Headers.remove headers "host", h
+    | None, Some a ->
+      H2.Headers.remove headers ":authority", a
+    | Some h, Some a ->
+      if String.equal h a then
+        H2.Headers.remove (H2.Headers.remove headers ":authority") "host", h
+      else begin
+        Log.warn (fun m -> m "authority header %s mismatches host %s (keeping both)" a h);
+        H2.Headers.remove headers ":authority", a
+      end
+  in
   let add hdr = H2.Headers.add_unless_exists hdr ?sensitive:None in
-  let headers = add headers ":authority" host in
-  let headers =
-    add headers "content-length"
+  let hdr = add H2.Headers.empty ":authority" authority in
+  let hdr = H2.Headers.add_list hdr (H2.Headers.to_rev_list headers) in
+  let hdr = add hdr "user-agent" user_agent in
+  let hdr =
+    add hdr "content-length"
       (string_of_int (Option.value ~default:0 blen))
   in
-  add_authentication ~add headers user_pass
+  add_authentication ~add hdr user_pass
 
 module Version = Httpaf.Version
 module Status = H2.Status
@@ -110,7 +142,7 @@ let single_http_1_1_request ?config fd user_pass host meth path headers body f f
   let w = ref false in
   let wakeup v =
     if !w then
-      Logs.err (fun m -> m "already woken up")
+      Log.err (fun m -> m "already woken up")
     else
       Lwt.wakeup_later notify_finished v;
     w := true
@@ -172,12 +204,12 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
   let blen = Option.map String.length body in
   let headers = prep_h2_headers headers host user_pass blen in
   let req = H2.Request.create ~scheme ~headers meth path in
-  Logs.debug (fun m -> m "Sending @[<v 0>%a@]" H2.Request.pp_hum req);
+  Log.debug (fun m -> m "Sending @[<v 0>%a@]" H2.Request.pp_hum req);
   let finished, notify_finished = Lwt.wait () in
   let w = ref false in
   let wakeup v =
     if !w then
-      Logs.err (fun m -> m "already woken up task")
+      Log.err (fun m -> m "already woken up task")
     else
       Lwt.wakeup_later notify_finished v;
     w := true
@@ -218,7 +250,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
         Format.kfprintf kerr Format.str_formatter "%a: %s" H2.Error_code.pp_hum err msg
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
-    Logs.app (fun m -> m "here %s" (match err with Ok _ -> "ok" | Error `Msg m -> m));
+    Log.app (fun m -> m "here %s" (match err with Ok _ -> "ok" | Error `Msg m -> m));
     wakeup err
   in
   let connection =
@@ -245,7 +277,7 @@ let alpn_protocol = function
     | Ok { Tls.Core.alpn_protocol= Some "http/1.1"; _ } -> Some `HTTP_1_1
     | Ok { Tls.Core.alpn_protocol= None; _ } -> None
     | Ok { Tls.Core.alpn_protocol= Some protocol; _ } ->
-      Logs.warn (fun m -> m "The ALPN negotiation unexpectedly resulted in %S."
+      Log.warn (fun m -> m "The ALPN negotiation unexpectedly resulted in %S."
                     protocol);
       None
     | Error () -> None
@@ -264,22 +296,22 @@ let single_request resolver ?config tls_config ~meth ~headers ?body uri f f_init
   connect resolver ?port ?tls_config host >>= fun fd ->
   begin match alpn_protocol fd, config with
   | (Some `HTTP_1_1 | None), Some (`HTTP_1_1 config) ->
-    Logs.debug (fun m -> m "Start an http/1.1 connection as expected.");
+    Log.debug (fun m -> m "Start an http/1.1 connection as expected.");
     single_http_1_1_request ~config fd user_pass host meth path headers body f f_init
   | (Some `HTTP_1_1 | None), None ->
-    Logs.debug (fun m -> m "Start an http/1.1 connection by default.");
+    Log.debug (fun m -> m "Start an http/1.1 connection by default.");
     single_http_1_1_request fd user_pass host meth path headers body f f_init
   | (Some `H2 | None), Some (`H2 config) ->
-    Logs.debug (fun m -> m "Start an h2 connection as expected.");
+    Log.debug (fun m -> m "Start an h2 connection as expected.");
     single_h2_request ~config fd scheme user_pass host meth path headers body f f_init
   | Some `H2, None ->
-    Logs.debug (fun m -> m "Start an h2 connection as requested by the server.");
+    Log.debug (fun m -> m "Start an h2 connection as requested by the server.");
     single_h2_request fd scheme user_pass host meth path headers body f f_init
   | Some `H2, Some (`HTTP_1_1 _config) ->
-    Logs.warn (fun m -> m "Initiate an h2 connection despite a requested http/1.1 connection.");
+    Log.warn (fun m -> m "Initiate an h2 connection despite a requested http/1.1 connection.");
     single_h2_request fd scheme user_pass host meth path headers body f f_init
   | Some `HTTP_1_1, Some (`H2 _config) ->
-    Logs.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.");
+    Log.warn (fun m -> m "Initiate an http/1.1 connection despite a requested h2 connection.");
     single_http_1_1_request fd user_pass host meth path headers body f f_init
   end >>= fun (resp, body) ->
   Lwt.map (fun body -> Ok (resp, body)) body
@@ -344,7 +376,7 @@ let request
           (match Headers.get resp.headers "location" with
            | Some location ->
              Lwt_result.lift (resolve_location ~uri ~location) >>= fun uri ->
-             Logs.debug (fun m -> m "following redirect to %s" uri);
+             Log.debug (fun m -> m "following redirect to %s" uri);
              follow_redirect (pred count) uri
            | None -> Lwt_result.return (resp, body))
         else

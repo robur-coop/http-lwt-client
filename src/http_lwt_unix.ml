@@ -34,6 +34,9 @@
 
 open Lwt.Infix
 
+let src = Logs.Src.create "http_lwt_unix" ~doc:"HTTP client, unix"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module Buffer : sig
   type t
 
@@ -93,10 +96,10 @@ let read fd buffer =
            | `Tls t -> Tls_lwt.Unix.read_bytes t bigstring off len))
     (function
     | Unix.Unix_error (Unix.EBADF, _, _) as exn ->
-      Logs.err (fun m -> m "bad fd in read");
+      Log.err (fun m -> m "bad fd in read");
       Lwt.fail exn
     | exn ->
-      Logs.err (fun m -> m "exception read %s" (Printexc.to_string exn));
+      Log.err (fun m -> m "exception read %s" (Printexc.to_string exn));
       (match fd with `Plain fd -> Lwt_unix.close fd | `Tls t -> Tls_lwt.Unix.close t) >>= fun () ->
       Lwt.fail exn)
 
@@ -184,7 +187,7 @@ module Make (Runtime : RUNTIME) = struct
               Tls_lwt.Unix.writev t cs >|= fun () ->
               `Ok (Cstruct.lenv cs))
             (fun exn ->
-               Logs.err (fun m -> m "exception writev: %s" (Printexc.to_string exn));
+               Log.err (fun m -> m "exception writev: %s" (Printexc.to_string exn));
                Tls_lwt.Unix.close t >|= fun () ->
                `Closed)
     in
