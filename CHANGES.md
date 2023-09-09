@@ -24,7 +24,7 @@
 * API: In the body function passed to request, the response is the first
   argument. This allows a client to do different stuff with the body, depending
   on the response code (and/or content type etc.) (#15 by @hannesm, reviewed and
-  suggested by @reynir in https://git.robur.io/robur/http-mirage-client/pulls/2)
+  suggested by @reynir in https://git.robur.coop/robur/http-mirage-client/pulls/2)
 
 ## v0.1.0 (2022-10-25)
 
