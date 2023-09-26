@@ -1,5 +1,12 @@
 (library
  (name http_lwt_client)
  (public_name http-lwt-client)
+ (modules http_lwt_client http_lwt_unix)
  (libraries faraday-lwt-unix h2 httpaf lwt.unix tls tls-lwt ca-certs base64
             logs happy-eyeballs-lwt))
+
+(library
+ (name http_client)
+ (public_name http-client)
+ (modules flow http_miou_unix http_client tls_miou)
+ (libraries ke httpaf h2 tls miou miou.unix))
