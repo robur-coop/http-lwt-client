@@ -1,3 +1,7 @@
+let src = Logs.Src.create "tls-miou"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module Make (Flow : Flow.S) = struct
   type error =
     [ `Tls_alert of Tls.Packet.alert_type
@@ -39,6 +43,7 @@ module Make (Flow : Flow.S) = struct
       match (flow.state, lift_write_result res) with
       | `Active _, ((`End_of_input | `Error _) as err) ->
           flow.state <- err;
+          Log.warn (fun m -> m "close the socket due to a writing error");
           Flow.close flow.flow
       | _ -> ()
     in
@@ -60,7 +65,18 @@ module Make (Flow : Flow.S) = struct
             | None -> Ok ()
             | Some buf -> check_write flow (Flow.writev flow.flow [ buf ])
           in
-          let () = match res with `Ok _ -> () | _ -> Flow.close flow.flow in
+          (*
+          NOTE(dinosaure): with the /shutdown/ thing, we should not close
+          the connection and let the user to do so.
+
+          let () =
+            match res with
+            | `Ok _ -> ()
+            | _ ->
+                Log.warn (fun m -> m "close the socket due to a reading error");
+                Flow.close flow.flow
+          in
+          *)
           let data =
             match data with
             | None -> None
@@ -75,6 +91,7 @@ module Make (Flow : Flow.S) = struct
           let reason = tls_fail failure in
           flow.state <- reason;
           let _ = Flow.writev flow.flow [ resp ] in
+          Log.warn (fun m -> m "close the socket due to a reading error");
           Flow.close flow.flow;
           reason
     in
@@ -141,6 +158,7 @@ module Make (Flow : Flow.S) = struct
         flow.state <- `End_of_input;
         let _, buf = Tls.Engine.send_close_notify tls in
         let _ = Flow.writev flow.flow [ buf ] in
+        Log.debug (fun m -> m "close the socket");
         Flow.close flow.flow
     | _ -> ()
 

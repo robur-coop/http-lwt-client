@@ -233,6 +233,7 @@ module Make (Flow : Flow.S) (Runtime : RUNTIME) :
               len
           | Ok `End_of_input -> 0
           | Error err ->
+              Logr.debug (fun m -> m "close the socket (recv)");
               Flow.close flow;
               raise (Flow (Fmt.str "%a" Flow.pp_error err)))
     in
@@ -245,7 +246,9 @@ module Make (Flow : Flow.S) (Runtime : RUNTIME) :
     | Ok () ->
         let len = List.fold_left (fun a { Cstruct.len; _ } -> a + len) 0 css in
         `Ok len
-    | Error _err ->
+    | Error err ->
+        Logr.err (fun m -> m "got an error: %a" Flow.pp_error err);
+        Logr.debug (fun m -> m "close the socket (writev)");
         Flow.close flow;
         `Closed
 
@@ -357,6 +360,7 @@ module Make (Flow : Flow.S) (Runtime : RUNTIME) :
             terminate orphans
         | `Close _ ->
             Logr.debug (fun m -> m "next write operation: `close");
+            (* TODO(dinosaure): something already closed the socket when we use http/1.1 *)
             Flow.shutdown flow `Send;
             terminate orphans
       in
