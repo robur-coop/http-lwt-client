@@ -8,5 +8,9 @@
 (library
  (name http_client)
  (public_name http-client)
- (modules flow http_miou_unix http_client tls_miou)
- (libraries ke httpaf h2 tls miou miou.unix))
+ (modules flow happy mdns http_miou_unix http_client tls_miou)
+ (foreign_stubs
+  (language c)
+  (names happy)
+  (flags (:standard)))
+ (libraries hxd.string hxd.core ca-certs dns dns-client ipaddr.unix mtime.clock.os happy-eyeballs ke httpaf h2 tls miou miou.unix))

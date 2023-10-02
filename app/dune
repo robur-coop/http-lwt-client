@@ -1,5 +1,12 @@
 (executable
   (name hurl)
   (public_name hurl)
+  (modules hurl)
+  (package http-lwt-client)
   (libraries http-lwt-client lwt.unix logs.fmt fmt.cli logs.cli fmt.tty
              cmdliner bos))
+
+(executable
+ (name hurle)
+ (modules hurle)
+ (libraries logs.fmt fmt.tty logs.threaded mirage-crypto-rng.unix http-client hxd.string hxd.core))

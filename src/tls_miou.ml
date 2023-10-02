@@ -2,13 +2,15 @@ module Make (Flow : Flow.S) = struct
   type error =
     [ `Tls_alert of Tls.Packet.alert_type
     | `Tls_failure of Tls.Engine.failure
-    | `Flow of Flow.error
+    | `Read of Flow.error
+    | `Write of Flow.error
     | `Closed ]
 
   let pp_error ppf = function
     | `Tls_failure failure -> Tls.Engine.pp_failure ppf failure
     | `Tls_alert alert -> Fmt.string ppf (Tls.Packet.alert_type_to_string alert)
-    | `Flow err -> Flow.pp_error ppf err
+    | `Read err -> Flow.pp_error ppf err
+    | `Write err -> Flow.pp_error ppf err
     | `Closed -> Fmt.string ppf "Connection closed by peer"
 
   type state = [ `Active of Tls.Engine.state | `End_of_input | `Error of error ]
@@ -18,6 +20,7 @@ module Make (Flow : Flow.S) = struct
     flow : Flow.t;
     mutable state : state;
     mutable linger : Cstruct.t list;
+    mutable writer_closed : bool;
   }
 
   let tls_alert alert = `Error (`Tls_alert alert)
@@ -25,11 +28,11 @@ module Make (Flow : Flow.S) = struct
 
   let lift_read_result = function
     | Ok ((`Data _ | `End_of_input) as x) -> x
-    | Error err -> `Error (`Flow err)
+    | Error err -> `Error (`Read err)
 
   let lift_write_result = function
     | Ok () -> `Ok ()
-    | Error err -> `Error (`Flow err)
+    | Error err -> `Error (`Write err)
 
   let check_write flow res =
     let () =
@@ -39,9 +42,9 @@ module Make (Flow : Flow.S) = struct
           Flow.close flow.flow
       | _ -> ()
     in
-    match res with Ok () -> Ok () | Error err -> Error (`Flow err)
+    match res with Ok () -> Ok () | Error err -> Error (`Write err)
 
-  let read_react flow =
+  let read_react ~read_buffer_size flow =
     let handle tls buf =
       match Tls.Engine.handle_tls tls buf with
       | Ok (res, `Response resp, `Data data) ->
@@ -58,6 +61,15 @@ module Make (Flow : Flow.S) = struct
             | Some buf -> check_write flow (Flow.writev flow.flow [ buf ])
           in
           let () = match res with `Ok _ -> () | _ -> Flow.close flow.flow in
+          let data =
+            match data with
+            | None -> None
+            | Some data when Cstruct.length data > read_buffer_size ->
+                let data, linger = Cstruct.split data read_buffer_size in
+                flow.linger <- linger :: flow.linger;
+                Some data
+            | Some data -> Some data
+          in
           `Ok data
       | Error (failure, `Response resp) ->
           let reason = tls_fail failure in
@@ -69,7 +81,7 @@ module Make (Flow : Flow.S) = struct
     match flow.state with
     | (`End_of_input | `Error _) as err -> err
     | `Active _ -> (
-        match lift_read_result (Flow.read flow.flow) with
+        match lift_read_result (Flow.read ~read_buffer_size flow.flow) with
         | (`End_of_input | `Error _) as v ->
             flow.state <- v;
             v
@@ -78,28 +90,37 @@ module Make (Flow : Flow.S) = struct
             | `Active tls -> handle tls buf
             | (`End_of_input | `Error _) as v -> v))
 
-  let rec read flow =
+  let split ~len cs =
+    if Cstruct.length cs >= len then Cstruct.split cs len
+    else (cs, Cstruct.empty)
+
+  let rec read ?(read_buffer_size = 0x1000) flow =
     match flow.linger with
     | _ :: _ as bufs ->
-        flow.linger <- [];
-        Ok (`Data (Cstruct.concat (List.rev bufs)))
+        let cs = Cstruct.concat (List.rev bufs) in
+        let data, linger = split ~len:read_buffer_size cs in
+        if Cstruct.length linger > 0 then flow.linger <- [ linger ]
+        else flow.linger <- [];
+        Ok (`Data data)
     | [] -> (
-        match read_react flow with
-        | `Ok None -> read flow
+        match read_react ~read_buffer_size flow with
+        | `Ok None -> read ~read_buffer_size flow
         | `Ok (Some buf) -> Ok (`Data buf)
         | `End_of_input -> Ok `End_of_input
         | `Error e -> Error e)
 
   let writev flow bufs =
-    match flow.state with
-    | `End_of_input -> Error `Closed
-    | `Error e -> Error e
-    | `Active tls -> (
-        match Tls.Engine.send_application_data tls bufs with
-        | Some (tls, answer) ->
-            flow.state <- `Active tls;
-            check_write flow (Flow.writev flow.flow [ answer ])
-        | None -> assert false)
+    if flow.writer_closed then Error `Closed
+    else
+      match flow.state with
+      | `End_of_input -> Error `Closed
+      | `Error e -> Error e
+      | `Active tls -> (
+          match Tls.Engine.send_application_data tls bufs with
+          | Some (tls, answer) ->
+              flow.state <- `Active tls;
+              check_write flow (Flow.writev flow.flow [ answer ])
+          | None -> assert false)
 
   let write flow buf = writev flow [ buf ]
 
@@ -107,7 +128,7 @@ module Make (Flow : Flow.S) = struct
     match flow.state with
     | `Active tls when not (Tls.Engine.handshake_in_progress tls) -> Ok flow
     | _ -> (
-        match read_react flow with
+        match read_react ~read_buffer_size:0x1000 flow with
         | `Ok mbuf ->
             flow.linger <- Option.to_list mbuf @ flow.linger;
             drain_handshake flow
@@ -123,12 +144,31 @@ module Make (Flow : Flow.S) = struct
         Flow.close flow.flow
     | _ -> ()
 
+  let shutdown flow v =
+    match (flow.state, v) with
+    | `Active tls, `Send when not flow.writer_closed ->
+        let tls, buf = Tls.Engine.send_close_notify tls in
+        flow.state <- `Active tls;
+        flow.writer_closed <- true;
+        let _ = Flow.writev flow.flow [ buf ] in
+        Flow.shutdown flow.flow `Send
+    | `Active _, _ -> close flow
+    | _ -> ()
+
   let client_of_flow conf ?host flow =
     let conf' =
       match host with None -> conf | Some host -> Tls.Config.peer conf host
     in
     let tls, init = Tls.Engine.client conf' in
-    let tls_flow = { role = `Client; flow; state = `Active tls; linger = [] } in
+    let tls_flow =
+      {
+        role = `Client;
+        flow;
+        state = `Active tls;
+        linger = [];
+        writer_closed = false;
+      }
+    in
     match check_write tls_flow (Flow.writev flow [ init ]) with
     | Ok () -> drain_handshake tls_flow
     | Error _ as err -> err
