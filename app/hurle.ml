@@ -25,7 +25,8 @@ let reporter ppf =
 
 let () = Fmt_tty.setup_std_outputs ~style_renderer:`Ansi_tty ~utf_8:true ()
 let () = Logs.set_reporter (reporter Fmt.stderr)
-let () = Logs.set_level ~all:true (Some Logs.Debug)
+
+(* let () = Logs.set_level ~all:true (Some Logs.Debug) *)
 let () = Logs_threaded.enable ()
 let () = Printexc.record_backtrace true
 let out = Mutex.create ()
