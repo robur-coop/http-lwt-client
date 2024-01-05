@@ -214,8 +214,7 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
       Lwt.wakeup_later notify_finished v;
     w := true
   in
-  let on_eof response data () = wakeup (Ok (response, data))
-  in
+  let on_eof response data () = wakeup (Ok (response, data)) in
   let response_handler response response_body =
     let response : response = {
       version = { major = 2 ; minor = 0 } ;
@@ -268,7 +267,9 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
    | Some body -> H2.Body.Writer.write_string request_body body
    | None -> ());
   H2.Body.Writer.close request_body;
-  finished
+  finished >|= fun res ->
+  H2.Client_connection.shutdown connection;
+  res
 
 let alpn_protocol = function
   | `Plain _ -> None
