@@ -267,9 +267,11 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
    | Some body -> H2.Body.Writer.write_string request_body body
    | None -> ());
   H2.Body.Writer.close request_body;
-  finished >|= fun res ->
-  H2.Client_connection.shutdown connection;
-  res
+  Lwt.finalize
+    (fun () -> finished)
+    (fun () ->
+       H2.Client_connection.shutdown connection;
+       Lwt.return_unit)
 
 let alpn_protocol = function
   | `Plain _ -> None
