@@ -1,3 +1,8 @@
+## v0.2.6 (2024-01-06)
+
+* Call shutdown in h2 to properly close http2 connections. This fixes a file
+  descriptor leak reported in #22 (#23, @reynir @hannesm)
+
 ## v0.2.5 (2023-07-05)
 
 * Order http2 headers appropriately to avoid malformed requests (#20, @hannesm)
