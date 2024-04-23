@@ -21,6 +21,7 @@ depends: [
   "fmt"
   "bos"
   "happy-eyeballs-lwt"
+  "stringext"
   "h2" {>= "0.10.0"}
 ]
 conflicts: [ "result" {< "1.5"} ]
