@@ -32,9 +32,20 @@
     POSSIBILITY OF SUCH DAMAGE.
   ----------------------------------------------------------------------------*)
 
+type connection = [ `Plain of Lwt_unix.file_descr | `Tls of Tls_lwt.Unix.t ]
+type keep_alive = { mutable fd : connection option
+                  ; lock : Lwt_mutex.t
+                  ; mutable max : int }
+
+val new_keep_alive : unit -> keep_alive
+val reset_keep_alive : ?close:bool -> keep_alive option -> unit Lwt.t
+val keep_alive_lock : keep_alive option -> unit Lwt.t
+val keep_alive_unlock : keep_alive option -> unit
+
 module Client_HTTP_1_1 : sig
   val request
-    :  ?read_buffer_size:int
+      :  ?read_buffer_size:int
+    -> ?keep_alive:keep_alive
     -> [ `Tls of Tls_lwt.Unix.t | `Plain of Lwt_unix.file_descr ]
     -> Httpaf.Client_connection.t
     -> unit
@@ -42,7 +53,8 @@ end
 
 module Client_H2 : sig
   val request
-    :  ?read_buffer_size:int
+      :  ?read_buffer_size:int
+    -> ?keep_alive:keep_alive
     -> [ `Tls of Tls_lwt.Unix.t | `Plain of Lwt_unix.file_descr ]
     -> H2.Client_connection.t
     -> unit

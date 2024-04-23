@@ -87,20 +87,67 @@ end = struct
     Lwt.return n
 end
 
-let read fd buffer =
+type connection = [ `Plain of Lwt_unix.file_descr | `Tls of Tls_lwt.Unix.t ]
+type keep_alive = { mutable fd : connection option
+                  ; lock : Lwt_mutex.t
+                  ; mutable max : int }
+
+let new_keep_alive () = { fd = None; lock = Lwt_mutex.create (); max = 100 }
+
+let keep_alive_lock = function
+  | Some _r -> Lwt.return_unit (*Lwt_mutex.lock r.lock*)
+  | None -> Lwt.return_unit
+
+let keep_alive_unlock = function
+  | Some ke -> if Lwt_mutex.is_locked ke.lock then Lwt_mutex.unlock ke.lock
+  | None -> ()
+
+let reset_keep_alive ?(close=false) keep_alive =
+  match keep_alive with
+  | Some ke ->
+     if Lwt_mutex.is_locked ke.lock then Lwt_mutex.unlock ke.lock;
+     Lwt.catch
+       (fun () -> let fd = ke.fd in
+                  ke.fd <- None;
+                  if close then
+                    match fd with
+                    | Some (`Plain fd) ->
+                       if Lwt_unix.state fd <> Lwt_unix.Closed then Lwt_unix.close fd
+                       else Lwt.return_unit
+                    | Some (`Tls t) -> Tls_lwt.Unix.close t
+                    | None -> Lwt.return_unit
+                  else Lwt.return_unit) (* ignore if close fails *)
+       (fun _ -> Lwt.return_unit)
+  | _ -> Lwt.return_unit
+
+let must_close keep_alive =
+  match keep_alive with
+  | None -> true
+  | Some { max; _ } when max <= 1 -> true
+  | _ -> false
+
+let close keep_alive fd =
+  (match fd with
+     | `Plain fd ->
+        if Lwt_unix.state fd <> Lwt_unix.Closed then Lwt_unix.close fd
+        else Lwt.return_unit
+     | `Tls t -> Tls_lwt.Unix.close t)
+  >>= (fun () -> reset_keep_alive keep_alive)
+
+let read keep_alive fd buffer =
   Lwt.catch
     (fun () ->
-       Buffer.put buffer ~f:(fun bigstring ~off ~len ->
-           match fd with
-           | `Plain fd -> Lwt_bytes.read fd bigstring off len
-           | `Tls t -> Tls_lwt.Unix.read_bytes t bigstring off len))
+      Buffer.put buffer ~f:(fun bigstring ~off ~len ->
+          match fd with
+          | `Plain fd -> Lwt_bytes.read fd bigstring off len
+          | `Tls t -> Tls_lwt.Unix.read_bytes t bigstring off len))
     (function
     | Unix.Unix_error (Unix.EBADF, _, _) as exn ->
-      Log.err (fun m -> m "bad fd in read");
-      Lwt.fail exn
+       Log.err (fun m -> m "bad fd in read");
+       reset_keep_alive keep_alive >>= (fun () -> Lwt.fail exn)
     | exn ->
       Log.err (fun m -> m "exception read %s" (Printexc.to_string exn));
-      (match fd with `Plain fd -> Lwt_unix.close fd | `Tls t -> Tls_lwt.Unix.close t) >>= fun () ->
+      close keep_alive fd >>= fun () ->
       Lwt.fail exn)
 
   >>= fun bytes_read ->
@@ -127,7 +174,8 @@ module type RUNTIME = sig
 end
 
 module Make (Runtime : RUNTIME) = struct
-  let request ?(read_buffer_size = 0x1000) socket connection =
+  let request ?(read_buffer_size = 0x1000) ?keep_alive socket connection =
+
     let module Client_connection = Httpaf.Client_connection in
 
     let read_buffer = Buffer.create read_buffer_size in
@@ -137,40 +185,45 @@ module Make (Runtime : RUNTIME) = struct
       let rec read_loop_step () =
         match Runtime.next_read_operation connection with
         | `Yield ->
-          Runtime.yield_reader connection read_loop ;
-          Lwt.pause ()
+           Runtime.yield_reader connection read_loop;
+           Lwt.return_unit
         | `Read ->
-          read socket read_buffer >>= begin function
-          | `Eof ->
-            Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
-              Runtime.read_eof connection bigstring ~off ~len)
-            |> ignore;
-            read_loop_step ()
-          | `Ok _ ->
-            Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
-              Runtime.read connection bigstring ~off ~len)
-            |> ignore;
-            Lwt.pause () >>= read_loop_step
-          end
+             read keep_alive socket read_buffer >>= begin
+              function
+              | `Eof ->
+                 Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
+                       Runtime.read_eof connection bigstring ~off ~len)
+                 |> ignore;
+                 read_loop_step ()
+              | `Ok _ ->
+                 Buffer.get read_buffer ~f:(fun bigstring ~off ~len ->
+                     Runtime.read connection bigstring ~off ~len)
+                 |> ignore;
+                 Lwt.return_unit >>= read_loop_step
+            end
 
         | `Close ->
-          Lwt.wakeup_later notify_read_loop_exited ();
-          match socket with
-          | `Plain socket ->
-            if not (Lwt_unix.state socket = Lwt_unix.Closed) then begin
-              shutdown socket Unix.SHUTDOWN_RECEIVE
-            end;
-            Lwt.return_unit
-          | `Tls _t -> (* no shutdown of receive part in TLS *)
-            Lwt.return_unit
+           Lwt.wakeup_later notify_read_loop_exited ();
+           if must_close keep_alive then
+             begin
+               match socket with
+               | `Plain socket ->
+                  if not (Lwt_unix.state socket = Lwt_unix.Closed) then begin
+                      shutdown socket Unix.SHUTDOWN_RECEIVE
+                    end;
+               | `Tls _t -> () (* no shutdown of receive part in TLS *)
+             end
+           else keep_alive_unlock keep_alive;
+           Lwt.return_unit
+
       in
 
       Lwt.async (fun () ->
-        Lwt.catch
-          read_loop_step
-          (fun exn ->
-            Runtime.report_exn connection exn;
-            Lwt.return_unit))
+          Lwt.catch
+            read_loop_step
+            (fun exn ->
+              Runtime.report_exn connection exn;
+              Lwt.return_unit))
     in
 
 
@@ -178,63 +231,56 @@ module Make (Runtime : RUNTIME) = struct
       match socket with
       | `Plain socket -> Faraday_lwt_unix.writev_of_fd socket
       | `Tls t ->
-        fun vs ->
-          let cs =
-            List.map (fun { Faraday.buffer ; off ; len } ->
-                Cstruct.of_bigarray ~off ~len buffer) vs
-          in
-          Lwt.catch (fun () ->
-              Tls_lwt.Unix.writev t cs >|= fun () ->
-              `Ok (Cstruct.lenv cs))
-            (fun exn ->
+         fun vs ->
+           let cs =
+             List.map (fun { Faraday.buffer ; off ; len } ->
+                 Cstruct.of_bigarray ~off ~len buffer) vs
+           in
+           Lwt.catch (fun () ->
+               Tls_lwt.Unix.writev t cs >|= fun () ->
+               `Ok (Cstruct.lenv cs))
+             (fun exn ->
                Log.err (fun m -> m "exception writev: %s" (Printexc.to_string exn));
-               Tls_lwt.Unix.close t >|= fun () ->
-               `Closed)
-    in
-    let write_loop_exited, notify_write_loop_exited = Lwt.wait () in
+               close keep_alive socket
+               >|= fun () -> `Closed)
+      in
+      let write_loop_exited, notify_write_loop_exited = Lwt.wait () in
 
-    let rec write_loop () =
-      let rec write_loop_step () =
-        match Runtime.next_write_operation connection with
-        | `Write io_vectors ->
-          writev io_vectors >>= fun result ->
-          Runtime.report_write_result connection result;
-          Lwt.pause () >>= write_loop_step
+      let rec write_loop () =
+        let rec write_loop_step () =
+          match Runtime.next_write_operation connection with
+          | `Write io_vectors ->
+             writev io_vectors >>= fun result ->
+             Runtime.report_write_result connection result;
+             Lwt.return_unit >>= write_loop_step
 
-        | `Yield ->
-          Runtime.yield_writer connection write_loop;
-          Lwt.pause ()
+          | `Yield ->
+             Runtime.yield_writer connection write_loop;
+             Lwt.return_unit
 
-        | `Close _ ->
-          Lwt.wakeup_later notify_write_loop_exited ();
-          Lwt.return_unit
+          | `Close _ ->
+             Lwt.wakeup_later notify_write_loop_exited ();
+             Lwt.return_unit
+        in
+
+        Lwt.async (fun () ->
+            Lwt.catch
+              write_loop_step
+              (fun exn ->
+                Runtime.report_exn connection exn;
+                Lwt.return_unit))
       in
 
+
+      read_loop ();
+      write_loop ();
       Lwt.async (fun () ->
-        Lwt.catch
-          write_loop_step
-          (fun exn ->
-            Runtime.report_exn connection exn;
-            Lwt.return_unit))
-    in
+          Lwt.join [read_loop_exited; write_loop_exited] >>= fun () ->
+          if must_close keep_alive then close keep_alive socket
+          else Lwt.return_unit)
 
-
-    read_loop ();
-    write_loop ();
-
-    Lwt.async (fun () ->
-      Lwt.join [read_loop_exited; write_loop_exited] >>= fun () ->
-
-      match socket with
-      | `Plain socket ->
-        if Lwt_unix.state socket <> Lwt_unix.Closed then
-          Lwt.catch
-            (fun () -> Lwt_unix.close socket)
-            (fun _exn -> Lwt.return_unit)
-        else
-          Lwt.return_unit
-      | `Tls t -> Tls_lwt.Unix.close t);
 end
+
 
 module Httpaf_client_connection = struct
   include Httpaf.Client_connection

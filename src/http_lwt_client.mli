@@ -33,6 +33,12 @@ type response =
 (** [pp_response ppf response] pretty-prints the [response] on [ppf]. *)
 val pp_response : Format.formatter -> response -> unit
 
+type keep_alive
+
+val new_keep_alive : unit -> keep_alive
+val active_keep_alive : keep_alive option -> bool
+val reset_keep_alive : ?close:bool -> keep_alive option -> unit Lwt.t
+
 (** [request ~config ~authenticator ~meth ~headers ~body ~max_redirect
     ~follow_redirect ~happy_eyeballs uri f init] does a single request of [uri]
     and returns the response. Each time part of the body is received,
@@ -67,7 +73,8 @@ val request
   -> ?max_redirect:int
   -> ?follow_redirect:bool
   -> ?happy_eyeballs:Happy_eyeballs_lwt.t
+  -> ?keep_alive:keep_alive
   -> string
   -> (response -> 'a -> string -> 'a Lwt.t)
   -> 'a
-  -> (response * 'a, [> `Msg of string ]) Lwt_result.t
+  -> (response * 'a, [ `Msg of string ]) Lwt_result.t
