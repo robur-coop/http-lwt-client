@@ -181,11 +181,11 @@ module Make (Runtime : RUNTIME) = struct
         fun vs ->
           let cs =
             List.map (fun { Faraday.buffer ; off ; len } ->
-                Cstruct.of_bigarray ~off ~len buffer) vs
+                Bigstringaf.substring ~off ~len buffer) vs
           in
           Lwt.catch (fun () ->
               Tls_lwt.Unix.writev t cs >|= fun () ->
-              `Ok (Cstruct.lenv cs))
+              `Ok (List.fold_left (+) 0 (List.map String.length cs)))
             (fun exn ->
                Log.err (fun m -> m "exception writev: %s" (Printexc.to_string exn));
                Tls_lwt.Unix.close t >|= fun () ->

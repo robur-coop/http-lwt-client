@@ -361,10 +361,10 @@ let request
            | None -> Lazy.force default_auth
            | Some a -> Ok a
          in
-         Result.map
-           (fun authenticator ->
-              `Default (Tls.Config.client ~alpn_protocols ~authenticator ()))
-           auth)
+         let ( let* ) = Result.bind in
+         let* authenticator = auth in
+         let* cfg = Tls.Config.client ~alpn_protocols ~authenticator () in
+         Ok (`Default cfg))
   in
   if not follow_redirect then
     single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri f f_init
