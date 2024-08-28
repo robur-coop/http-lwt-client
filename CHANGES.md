@@ -1,3 +1,8 @@
+## v0.3.0 (2024-08-28)
+
+* http2: shutdown the connection once finished (#23, @reynir)
+* update to TLS 1.0 API (#25, @hannesm)
+
 ## v0.2.5 (2023-07-05)
 
 * Order http2 headers appropriately to avoid malformed requests (#20, @hannesm)
