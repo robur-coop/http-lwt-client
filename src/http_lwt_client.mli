@@ -38,6 +38,8 @@ val pp_response : Format.formatter -> response -> unit
     and returns the response. Each time part of the body is received,
     [f acc part] is called, with [acc] being the last return value of [f]
     (or [init] if it is the first time) and [part] being the body part received.
+    If [follow_redirect] is true (the default), and there's a redirection, [f]
+    is not called with the (potential) body of the redirection page.
 
     By default, up to 5 redirects ([max_redirect]) are followed.
     If [follow_redirect] is false, no redirect is followed (defaults to true).
