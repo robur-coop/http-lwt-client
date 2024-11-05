@@ -1,3 +1,8 @@
+## v0.3.1 (2024-11-05)
+
+* Body of a redirect is skipped ([f] is not called with the body) (#26 @hannesm)
+* hurl: --output must be a non-existing file (#26 @hannesm)
+
 ## v0.3.0 (2024-08-28)
 
 * http2: shutdown the connection once finished (#23, @reynir)
