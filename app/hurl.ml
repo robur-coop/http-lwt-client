@@ -18,7 +18,9 @@ let jump () protocol uri meth headers input output no_follow =
     let fd, close = match output with
       | None -> Unix.stdout, fun () -> ()
       | Some fn ->
-        let fd = Unix.openfile fn [ Unix.O_WRONLY ] 0o644 in
+        if Sys.file_exists fn then
+          invalid_arg ("output file " ^ fn ^ " already exists");
+        let fd = Unix.openfile fn [ Unix.O_WRONLY; Unix.O_CREAT ] 0o644 in
         fd, fun () -> Unix.close fd
     in
     let reply _response () data =
@@ -58,7 +60,7 @@ let uri =
 
 let output =
   let doc = "Save body output to a file" in
-  Arg.(value & opt (some file) None & info [ "output" ] ~doc ~docv:"OUTPUT")
+  Arg.(value & opt (some string) None & info [ "output" ] ~doc ~docv:"OUTPUT")
 
 let input =
   let doc = "Upload a file as body" in
