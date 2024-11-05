@@ -373,6 +373,12 @@ let request
       if count = 0 then
         Lwt.return (Error (`Msg "redirect limit exceeded"))
       else
+        let f response acc data =
+          if Status.is_redirection response.status then
+            Lwt.return acc
+          else
+            f response acc data
+        in
         single_request happy_eyeballs ?config tls_config ~meth ~headers ?body uri f f_init
         >>= fun (resp, body) ->
         if Status.is_redirection resp.status then
