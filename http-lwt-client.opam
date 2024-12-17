@@ -30,3 +30,4 @@ build: [
 ]
 
 synopsis: "A simple HTTP client using http/af, h2, and lwt"
+x-maintenance-intent: [ "(latest)" ]
