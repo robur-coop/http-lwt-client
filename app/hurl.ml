@@ -67,11 +67,11 @@ let input =
   Arg.(value & opt (some file) None & info [ "input" ] ~doc ~docv:"INPUT")
 
 let header_c =
-  let parse s = match String.split_on_char ':' s with
-    | [ key ; value ] -> `Ok (key, String.trim value)
-    | _ -> `Error "couldn't decode header"
-  in
-  (parse, fun ppf (a, b) -> Fmt.pf ppf "%s:%s" a b)
+  Arg.conv' (
+    (fun s -> match String.split_on_char ':' s with
+       | [ key ; value ] -> Ok (key, String.trim value)
+       | _ -> Error "couldn't decode header"),
+    (fun ppf (a, b) -> Fmt.pf ppf "%s:%s" a b))
 
 let header =
   let doc = "HTTP header (key:value)" in
