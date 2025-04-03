@@ -1,3 +1,7 @@
+## v0.3.2 (2025-04-03)
+
+* Handle cmdliner deprecations (reported in #27, fixed in #28)
+
 ## v0.3.1 (2024-11-05)
 
 * Body of a redirect is skipped ([f] is not called with the body) (#26 @hannesm)
