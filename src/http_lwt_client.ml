@@ -243,13 +243,13 @@ let single_h2_request ?config fd scheme user_pass host meth path headers body f 
   let error_handler e =
     let err = match e with
       | `Malformed_response x -> Error (`Msg ("malformed response: " ^ x))
-      | `Invalid_response_body_length _ -> Error (`Msg "invalid response body length")
+      | `Invalid_response_body_length _ ->
+        Error (`Msg "invalid response body length")
       | `Protocol_error (err, msg) ->
-        let kerr _ = Error (`Msg (Format.flush_str_formatter ())) in
-        Format.kfprintf kerr Format.str_formatter "%a: %s" H2.Error_code.pp_hum err msg
+        Format.kasprintf (fun e -> Error (`Msg e)) "%a: %s"
+          H2.Error_code.pp_hum err msg
       | `Exn e -> Error (`Msg ("exception here: " ^ Printexc.to_string e))
     in
-    Log.app (fun m -> m "here %s" (match err with Ok _ -> "ok" | Error `Msg m -> m));
     wakeup err
   in
   let connection =
