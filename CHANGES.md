@@ -1,3 +1,7 @@
+## v0.3.3 (2026-09-14)
+
+* Avoid Format.str_formatter
+
 ## v0.3.2 (2025-04-03)
 
 * Handle cmdliner deprecations (reported in #27, fixed in #28)
